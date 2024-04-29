@@ -1,20 +1,18 @@
 # injector-binding-rs inject RPC request into afb-v4 framework
 
-This injector initial objective addresses ISO15118 and OCPP simulation for charger and/or electric vehicle. Nevertheless nothing is specific to EV/EVSE and it may test/simulate any API based on Afb-v4 framework.
+This injector initial objective addresses ISO15118/OCPP simulation for charger and/or electric vehicle. Nevertheless nothing is specific to EV/EVSE and it may test/simulates any API based on Afb-V4 framework.
 
-The injector/simulator implement on api/verb per configure scenario. At the end of the test it return a normalized TAP response, that hopefully should integrated easily within any CI/CD model.
+The injector/simulator implements one api/verb per configure scenario. At the end of the test it return a normalized TAP response, that hopefully should integrated easily within any CI/CD model.
 
 ## Dependencies
 
 https://github.com/redpesk-common/afb-librust
 
-# configuration
+# Configuration
 
-Configuration relies on standard binding/binder json/yaml config file. The specific part dedicated to the injector.
+Configuration relies on standard binding/binder json/yaml config file. The injector create a new verb per scenario. When executing a scenario, client receives an event per action. At the end of the test client may request scenario global status that is then return as Json/TAP.
 
-The injector create a new verb per scenario. When executing a scenario use received an event per action. At the end of the test it may request scenario request that is then return as a TAP file.
-
-Scenario metadata should define:
+**Scenario metadata should define:**
 * uid: which define the api/verb to start/stop/check the execution
 * info: a simple free comment
 * target: the API to be tested. Depending on config, this might be local or remote API.
@@ -27,12 +25,12 @@ Scenario metadata should define:
         transactions:
 ```
 
-Scenarion transactions should defined:
+**Scenarion transactions should defined:**
 * uid: test name
-* verb: injector call $target/$test (when not defined use UI to build verb name uid-sample will call uid_sample_req)
+* verb: injector call $target/$test *(when not defined: derives from UID as: uid-sample->uid_sample_req)*
 * delay: wait in ms before starting the test
 * query: param value to be added to test/api/verb
-* response: optional expected response (test only defined values). When not defined injector relies on RPC status to set OK/FX test result.
+* response: optional expected response *(test only defined values)*. When not defined injector relies on RPC status to set OK/FX test result.
 
 ```yaml
         transactions:
