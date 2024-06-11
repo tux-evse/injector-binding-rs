@@ -2,21 +2,24 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "iso-2",
+            "name": "iso-responder",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
             "program": "afb-binder",
             "env": {
                 "LD_LIBRARY_PATH": "/usr/local/lib64",
-                "IFACE_SIMU": "simu-veth",
-                "PKI_TLS_DIR": "etc/"
+                "IFACE_SIMU": "lo",
+                "SIMULATION_PORT": "1235",
+                "SIMULATION_MODE": "responder",
             },
             "args": [
                 "-vv",
                 "--monitoring",
                 "--trap-faults=0",
-                "--config=iso15118-2/etc/binding-iso2.yaml",
+                "--port=1235",
+                "--config=etc/binder-injector.yaml",
+                "--config=etc/binding-injector.yaml",
             ],
             "cwd": "${workspaceFolder}",
             "initCommands": [
@@ -24,23 +27,25 @@
                 "settings set target.disable-aslr false"
             ]
         },
-        {
-            "name": "iso-simulator",
+                {
+            "name": "iso-injector",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
             "program": "afb-binder",
             "env": {
                 "LD_LIBRARY_PATH": "/usr/local/lib64",
-                "IFACE_SIMU": "simu-veth",
-                "PKI_TLS_DIR": "etc/"
+                "IFACE_SIMU": "lo",
+                "SIMULATION_PORT": "1234",
+                "SIMULATION_MODE": "injector",
             },
             "args": [
                 "-vv",
                 "--monitoring",
+                "--port=1234",
                 "--trap-faults=0",
-                "--config=iso15118-2//etc/binding-iso2.yaml",
-                "--config=simulator/etc/binding-simulator.yaml",
+                "--config=etc/binder-injector.yaml",
+                "--config=etc/binding-injector.yaml",
             ],
             "cwd": "${workspaceFolder}",
             "initCommands": [

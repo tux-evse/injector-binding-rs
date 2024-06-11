@@ -13,7 +13,13 @@
 use crate::prelude::*;
 use afbv4::prelude::*;
 
+pub enum SimulationMode {
+    Responder,
+    Injector,
+}
+
 pub struct BindingConfig {
+    pub simulation: SimulationMode,
     pub scenarios: JsoncObj,
 }
 
@@ -22,15 +28,23 @@ pub struct BindingConfig {
 pub fn binding_init(rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbApi, AfbError> {
     afb_log_msg!(Info, rootv4, "config:{}", jconf);
 
-    let uid = jconf.default::<&'static str>("uid", "iso15118-simu")?;
-    let api = jconf.default::<&'static str>("api", uid)?;
-    let info = jconf.default::<&'static str>("info", "")?;
+    let uid = jconf.default("uid", "iso15118-simu")?;
+    let api = jconf.default("api", uid)?;
+    let info = jconf.default("info", "")?;
+
+    let simulation = match jconf.default("simulation", "injector")? {
+        "" | "injector" => SimulationMode::Injector,
+        "responder" => SimulationMode::Responder,
+        other => return afb_error! ("simu-binding-config", "expected mode:'injector'|'responder' got:{}", other)
+    };
+
     let scenarios =    jconf.get::<JsoncObj>("scenarios")?;
     if ! scenarios.is_type(Jtype::Array) {
         return afb_error! ("simu-binding-config", "scenarios should be a valid array of simulator messages")
     }
 
     let config = BindingConfig {
+        simulation,
         scenarios: scenarios.clone(),
     };
     // create an register frontend api and register init session callback
