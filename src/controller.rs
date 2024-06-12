@@ -107,7 +107,7 @@ pub struct JobScenarioContext {
 
 pub struct JobScenarioParam {
     api: AfbApiV4,
-    Injector: &'static Injector,
+    injector: &'static Injector,
     event: &'static AfbEvent,
 }
 
@@ -144,7 +144,7 @@ fn job_scenario_cb(
             0,
             JobTransactionParam {
                 idx,
-                state: param.Injector.lock_state()?,
+                state: param.injector.lock_state()?,
                 api: param.api,
             },
         )?;
@@ -252,7 +252,7 @@ impl Injector {
         let job_id = self.job.post(
             1,
             JobScenarioParam {
-                Injector: self,
+                injector: self,
                 event,
                 api,
             },
