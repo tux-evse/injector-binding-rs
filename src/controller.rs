@@ -12,10 +12,11 @@
 
 use afbv4::prelude::*;
 use std::sync::{Mutex, MutexGuard};
+use std::cell::Cell;
 
 pub type InjectorReqCb = fn(
     api: AfbApiV4,
-    transac: &mut TransacEntry,
+    transac: &mut InjectorEntry,
     target: &'static str,
 ) -> Result<SimulationStatus, AfbError>;
 
@@ -165,16 +166,17 @@ pub enum SimulationStatus {
     Fail(AfbError)
 }
 
-pub struct TransacEntry {
+pub struct InjectorEntry {
     pub uid: &'static str,
     pub verb: &'static str,
-    pub query: Option<JsoncObj>,
-    pub expect: Option<JsoncObj>,
+    pub queries: JsoncObj,
+    pub expects: JsoncObj,
     pub status: SimulationStatus,
+    pub sequence: usize,
 }
 
 pub struct ScenarioState {
-    pub entries: Vec<TransacEntry>,
+    pub entries: Vec<InjectorEntry>,
 }
 
 pub struct Injector {
@@ -199,8 +201,14 @@ impl Injector {
         for idx in 0..config.count()? {
             let transac = config.index::<JsoncObj>(idx)?;
             let uid = transac.get::<&str>("uid")?;
-            let query = transac.optional::<JsoncObj>("query")?;
-            let expect = transac.optional::<JsoncObj>("expect")?;
+            let queries= JsoncObj::array();
+            if let Some(value) = transac.optional::<JsoncObj>("query")? {
+                queries.append(value)?;
+            }
+            let expects= JsoncObj::array();
+            if let Some(value) = transac.optional::<JsoncObj>("expext")? {
+                expects.append(value)?;
+            }
             let verb = match transac.optional::<&'static str>("verb")? {
                 Some(value) => value,
                 None => {
@@ -209,12 +217,13 @@ impl Injector {
                 }
             };
 
-            data_set.entries.push(TransacEntry {
+            data_set.entries.push(InjectorEntry {
                 uid,
                 verb,
-                query,
-                expect,
+                queries: JsoncObj::array(),
+                expects: JsoncObj::array(),
                 status: SimulationStatus::Idle,
+                sequence: 0,
             });
         }
 
@@ -281,5 +290,36 @@ impl Injector {
             result.append(status.as_str())?;
         }
         Ok(result)
+    }
+}
+
+pub struct ResponderEntry {
+    pub queries: JsoncObj,
+    pub expects: JsoncObj,
+    pub sequence: usize,
+    pub nonce: u32,
+    pub responder: &'static Responder,
+}
+
+pub struct ResponderReset {
+   pub responder: &'static Responder
+}
+
+pub struct Responder {
+    nonce: Cell<u32>,
+}
+
+impl Responder {
+    pub fn new() -> &'static Self {
+       let this=  Responder {nonce:Cell::new(0)};
+       Box::leak(Box::new(this))
+    }
+
+    pub fn reset(&'static self) {
+        self.nonce.set(self.nonce.get() + 1);
+    }
+
+    pub fn get_nonce(&'static self) -> u32 {
+        self.nonce.get()
     }
 }

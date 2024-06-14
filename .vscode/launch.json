@@ -1,39 +1,14 @@
 {
     "version": "0.2.0",
     "configurations": [
-        {
-            "name": "iso-responder",
+                        {
+            "name": "simple-injector",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
             "program": "afb-binder",
             "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib64",
-                "IFACE_SIMU": "lo",
-                "SIMULATION_PORT": "1235",
-                "SIMULATION_MODE": "responder",
-            },
-            "args": [
-                "-vv",
-                "--monitoring",
-                "--trap-faults=0",
-                "--port=1235",
-                "--config=etc/binder-injector.yaml",
-                "--config=etc/binding-injector.yaml",
-            ],
-            "cwd": "${workspaceFolder}",
-            "initCommands": [
-                "target stop-hook add -n _start -o continue",
-                "settings set target.disable-aslr false"
-            ]
-        },
-                {
-            "name": "iso-injector",
-            "type": "lldb",
-            "preLaunchTask": "binding-native-build",
-            "request": "launch",
-            "program": "afb-binder",
-            "env": {
+                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
                 "LD_LIBRARY_PATH": "/usr/local/lib64",
                 "IFACE_SIMU": "lo",
                 "SIMULATION_PORT": "1234",
@@ -52,6 +27,88 @@
                 "target stop-hook add -n _start -o continue",
                 "settings set target.disable-aslr false"
             ]
-        }
+        },
+        {
+            "name": "simple-responder",
+            "type": "lldb",
+            "preLaunchTask": "binding-native-build",
+            "request": "launch",
+            "program": "afb-binder",
+            "env": {
+                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
+                "LD_LIBRARY_PATH": "/usr/local/lib64",
+                "IFACE_SIMU": "lo",
+                "SIMULATION_PORT": "1235",
+                "SIMULATION_MODE": "responder",
+            },
+            "args": [
+                "-v",
+                "--monitoring",
+                "--trap-faults=0",
+                "--port=1235",
+                "--config=etc/binder-injector.yaml",
+                "--config=etc/binding-injector.yaml",
+            ],
+            "cwd": "${workspaceFolder}",
+            "initCommands": [
+                "target stop-hook add -n _start -o continue",
+                "settings set target.disable-aslr false"
+            ]
+        },
+                {
+            "name": "pcap-injector",
+            "type": "lldb",
+            "preLaunchTask": "binding-native-build",
+            "request": "launch",
+            "program": "afb-binder",
+            "env": {
+                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
+                "LD_LIBRARY_PATH": "/usr/local/lib64",
+                "IFACE_SIMU": "lo",
+                "SIMULATION_PORT": "1234",
+                "SIMULATION_MODE": "injector",
+            },
+            "args": [
+                "-vv",
+                "--monitoring",
+                "--port=1234",
+                "--trap-faults=0",
+                "--config=etc/binder-injector.yaml",
+                "--config=etc/mini-dc-iso2.json",
+            ],
+            "cwd": "${workspaceFolder}",
+            "initCommands": [
+                "target stop-hook add -n _start -o continue",
+                "settings set target.disable-aslr false"
+            ]
+        },
+                {
+            "name": "pcap-responder",
+            "type": "lldb",
+            "preLaunchTask": "binding-native-build",
+            "request": "launch",
+            "program": "afb-binder",
+            "env": {
+                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
+                "LD_LIBRARY_PATH": "/usr/local/lib64",
+                "IFACE_SIMU": "lo",
+                "SIMULATION_PORT": "1235",
+                "SIMULATION_MODE": "responder",
+            },
+            "args": [
+                "-v",
+                "--monitoring",
+                "--trap-faults=0",
+                "--port=1235",
+                "--config=etc/binder-injector.yaml",
+                "--config=etc/mini-dc-iso2.json",
+            ],
+            "cwd": "${workspaceFolder}",
+            "initCommands": [
+                "target stop-hook add -n _start -o continue",
+                "settings set target.disable-aslr false"
+            ]
+        },
+
     ]
 }

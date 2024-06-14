@@ -1,0 +1,396 @@
+{
+    "binding": [
+        {
+            "uid": "iso15118-simulator",
+            "info": "./afb-test/trace-logs/audi-dc-iso2.pcap",
+            "api": "iso15118-${SIMULATION_MODE}",
+            "path": "${CARGO_BINDING_DIR}/libafb_injector.so",
+            "simulation": "${SIMULATION_MODE}",
+            "scenarios": [
+                {
+                    "uid": "scenario:15118/iso2/1",
+                    "target": "15118/iso2",
+                    "transactions": [
+                        {
+                            "uid": "sdp-evse",
+                            "injector_only": true,
+                            "action": "discovery"
+                        },
+                        {
+                            "uid": "pkg:51",
+                            "verb": "session_setup_req",
+                            "delay": 56,
+                            "query": {
+                                "id": "[00,7d,fa,07,5e,4a]",
+                                "tagid": "session_setup_req"
+                            },
+                            "expect": {
+                                "id": "DE*PNX*E12345*1",
+                                "rcode": "new_session",
+                                "stamp": 0,
+                                "tagid": "session_setup_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:56",
+                            "verb": "service_discovery_req",
+                            "delay": 111,
+                            "query": {
+                                "tagid": "service_discovery_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "transfers": [
+                                    "dc_extended"
+                                ],
+                                "payments": [
+                                    "external"
+                                ],
+                                "tagid": "service_discovery_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:61",
+                            "verb": "payment_selection_req",
+                            "delay": 81,
+                            "query": {
+                                "option": "external",
+                                "services": [
+                                    {
+                                        "service_id": 1
+                                    }
+                                ],
+                                "tagid": "payment_selection_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "tagid": "payment_selection_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:68",
+                            "verb": "authorization_req",
+                            "delay": 51,
+                            "query": {
+                                "tagid": "authorization_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "processing": "customer_interaction",
+                                "tagid": "authorization_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:73",
+                            "verb": "authorization_req",
+                            "delay": 121,
+                            "query": {
+                                "tagid": "authorization_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "processing": "finished",
+                                "tagid": "authorization_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:78",
+                            "verb": "param_discovery_req",
+                            "delay": 131,
+                            "query": {
+                                "transfer_mode": "dc_extended",
+                                "max_shed_tuple": 192,
+                                "dc_param": {
+                                    "status": {
+                                        "ready": false,
+                                        "error": "no_error",
+                                        "evresssoc": 55
+                                    },
+                                    "max_voltage": {
+                                        "value": 4080,
+                                        "multiplier": -1,
+                                        "unit": "volt"
+                                    },
+                                    "max_current": {
+                                        "value": 5000,
+                                        "multiplier": -1,
+                                        "unit": "ampere"
+                                    },
+                                    "energy_request": {
+                                        "value": 5300,
+                                        "multiplier": 0,
+                                        "unit": "wh"
+                                    }
+                                },
+                                "tagid": "param_discovery_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "processing": "finished",
+                                "tuples": [
+                                    {
+                                        "description": 1,
+                                        "pmax": [
+                                            {
+                                                "pmax": {
+                                                    "value": 11000,
+                                                    "multiplier": 0,
+                                                    "unit": "watt"
+                                                },
+                                                "time_interval": {
+                                                    "start": 0,
+                                                    "duration": 86400
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "evse_dc_charge_param": {
+                                    "status": {
+                                        "error": "ready",
+                                        "notification": "none",
+                                        "delay": 0,
+                                        "isolation_status": "invalid"
+                                    },
+                                    "max_voltage": {
+                                        "value": 5200,
+                                        "multiplier": -1,
+                                        "unit": "volt"
+                                    },
+                                    "min_voltage": {
+                                        "value": 500,
+                                        "multiplier": -1,
+                                        "unit": "volt"
+                                    },
+                                    "max_current": {
+                                        "value": 3000,
+                                        "multiplier": -2,
+                                        "unit": "ampere"
+                                    },
+                                    "min_current": {
+                                        "value": 0,
+                                        "multiplier": -1,
+                                        "unit": "ampere"
+                                    },
+                                    "max_power": {
+                                        "value": 11000,
+                                        "multiplier": 0,
+                                        "unit": "watt"
+                                    },
+                                    "current_ripple": {
+                                        "value": 10,
+                                        "multiplier": -1,
+                                        "unit": "ampere"
+                                    },
+                                    "regul_tolerance": {
+                                        "value": 5,
+                                        "multiplier": -1,
+                                        "unit": "ampere"
+                                    },
+                                    "energy_to_deliver": {
+                                        "value": 10000,
+                                        "multiplier": 0,
+                                        "unit": "wh"
+                                    }
+                                },
+                                "tagid": "param_discovery_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:85",
+                            "verb": "cable_check_req",
+                            "delay": 740,
+                            "query": {
+                                "status": {
+                                    "ready": true,
+                                    "error": "no_error",
+                                    "evresssoc": 55
+                                },
+                                "tagid": "cable_check_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "status": {
+                                    "error": "ready",
+                                    "notification": "none",
+                                    "delay": 0,
+                                    "isolation_status": "invalid"
+                                },
+                                "processing": "ongoing",
+                                "tagid": "cable_check_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:90",
+                            "verb": "cable_check_req",
+                            "delay": 121,
+                            "query": {
+                                "status": {
+                                    "ready": true,
+                                    "error": "no_error",
+                                    "evresssoc": 55
+                                },
+                                "tagid": "cable_check_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "status": {
+                                    "error": "ready",
+                                    "notification": "none",
+                                    "delay": 0,
+                                    "isolation_status": "invalid"
+                                },
+                                "processing": "ongoing",
+                                "tagid": "cable_check_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:95",
+                            "verb": "cable_check_req",
+                            "delay": 123,
+                            "query": {
+                                "status": {
+                                    "ready": true,
+                                    "error": "no_error",
+                                    "evresssoc": 55
+                                },
+                                "tagid": "cable_check_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "status": {
+                                    "error": "ready",
+                                    "notification": "none",
+                                    "delay": 0,
+                                    "isolation_status": "invalid"
+                                },
+                                "processing": "ongoing",
+                                "tagid": "cable_check_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:100",
+                            "verb": "cable_check_req",
+                            "delay": 119,
+                            "query": {
+                                "status": {
+                                    "ready": true,
+                                    "error": "no_error",
+                                    "evresssoc": 55
+                                },
+                                "tagid": "cable_check_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "status": {
+                                    "error": "ready",
+                                    "notification": "none",
+                                    "delay": 0,
+                                    "isolation_status": "invalid"
+                                },
+                                "processing": "ongoing",
+                                "tagid": "cable_check_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:107",
+                            "verb": "cable_check_req",
+                            "delay": 121,
+                            "query": {
+                                "status": {
+                                    "ready": true,
+                                    "error": "no_error",
+                                    "evresssoc": 55
+                                },
+                                "tagid": "cable_check_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "status": {
+                                    "error": "ready",
+                                    "notification": "none",
+                                    "delay": 0,
+                                    "isolation_status": "invalid"
+                                },
+                                "processing": "ongoing",
+                                "tagid": "cable_check_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:112",
+                            "verb": "cable_check_req",
+                            "delay": 120,
+                            "query": {
+                                "status": {
+                                    "ready": true,
+                                    "error": "no_error",
+                                    "evresssoc": 55
+                                },
+                                "tagid": "cable_check_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "status": {
+                                    "error": "ready",
+                                    "notification": "none",
+                                    "delay": 0,
+                                    "isolation_status": "invalid"
+                                },
+                                "processing": "ongoing",
+                                "tagid": "cable_check_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:4161",
+                            "verb": "welding_detection_req",
+                            "delay": 691,
+                            "query": {
+                                "status": {
+                                    "ready": false,
+                                    "error": "no_error",
+                                    "evresssoc": 55
+                                },
+                                "tagid": "welding_detection_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "status": {
+                                    "error": "not_ready",
+                                    "notification": "none",
+                                    "delay": 0,
+                                    "isolation_status": "valid"
+                                },
+                                "voltage": {
+                                    "value": 2639,
+                                    "multiplier": -1,
+                                    "unit": "volt"
+                                },
+                                "tagid": "welding_detection_res"
+                            }
+                        },
+                        {
+                            "uid": "pkg:4168",
+                            "verb": "session_stop_req",
+                            "delay": 50,
+                            "query": {
+                                "action": "terminate",
+                                "tagid": "session_stop_req"
+                            },
+                            "expect": {
+                                "rcode": "ok",
+                                "tagid": "session_stop_res"
+                            }
+                        },
+                        {
+                            "uid": "sdp-evse",
+                            "injector_only": true,
+                            "query": {
+                                "action": "forget"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
