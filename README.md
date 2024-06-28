@@ -6,7 +6,33 @@ The injector/simulator implements one api/verb per configure scenario. At the en
 
 ## Dependencies
 
-https://github.com/redpesk-common/afb-librust
+* serde
+* serde_json
+
+## optional Dependencies
+
+* afbv4
+
+'afb-librust' should be install on your system.
+
+```bash
+/usr/lib/rustlib/%{_arch}-unknown-linux-gnu/lib/libafbv4.rlib
+```
+
+For development purpose, you can use an external libafbv4.
+To activate it, as a feature, you can execute:
+
+```bash
+cargo add --git https://github.com/redpesk-common/afb-librust afbv4 --optional
+```
+
+And build with the features "afbv4"
+
+```bash
+cargo build --features afbv4
+```
+
+You can also directly edit the file Cargo.toml, and manually change it.
 
 # Configuration
 
