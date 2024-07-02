@@ -4,10 +4,11 @@ binding:
     path: ${CARGO_TARGET_DIR}debug/libafb_injector.so
     info: RUST ISO-15118 EV Injector
     simulation: $SIMULATION_MODE
+    target: iso15118-api
     scenarios:
       - uid: scenario-1
         info: simple iso2 connection scenario
-        target: iso2
+        protocol: iso2
         transactions:
         - uid: sdp-evse
           query:

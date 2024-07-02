@@ -189,8 +189,9 @@ pub struct Injector {
 impl Injector {
     pub fn new(
         uid: &'static str,
-        target: &'static str,
-        config: JsoncObj,
+        target: Option<&'static str>,
+        prefix: &'static str,
+        transactions: JsoncObj,
         timeout: i32,
         callback: InjectorReqCb,
     ) -> Result<&'static Self, AfbError> {
@@ -198,21 +199,26 @@ impl Injector {
             entries: Vec::new(),
         };
 
-        for idx in 0..config.count()? {
-            let transac = config.index::<JsoncObj>(idx)?;
+        let target= match target {
+            Some(value) => value,
+            None => return afb_error!("injector-new", "missing target api from config")
+        };
+
+        for idx in 0..transactions.count()? {
+            let transac = transactions.index::<JsoncObj>(idx)?;
             let uid = transac.get::<&str>("uid")?;
             let queries= JsoncObj::array();
             if let Some(value) = transac.optional::<JsoncObj>("query")? {
                 queries.append(value)?;
             }
             let expects= JsoncObj::array();
-            if let Some(value) = transac.optional::<JsoncObj>("expext")? {
+            if let Some(value) = transac.optional::<JsoncObj>("expect")? {
                 expects.append(value)?;
             }
             let verb = match transac.optional::<&'static str>("verb")? {
                 Some(value) => value,
                 None => {
-                    let name = format!("{}_req", uid.replace("-", "_"));
+                    let name = format!("{}:{}_req", prefix, uid.replace("-", "_"));
                     to_static_str(name)
                 }
             };
@@ -220,8 +226,8 @@ impl Injector {
             data_set.entries.push(InjectorEntry {
                 uid,
                 verb,
-                queries: JsoncObj::array(),
-                expects: JsoncObj::array(),
+                queries: queries,
+                expects: expects,
                 status: SimulationStatus::Idle,
                 sequence: 0,
             });
@@ -239,7 +245,7 @@ impl Injector {
         let this = Self {
             uid,
             job,
-            count: config.count()?,
+            count: transactions.count()?,
             data_set: Mutex::new(data_set),
         };
 
@@ -307,19 +313,24 @@ pub struct ResponderReset {
 
 pub struct Responder {
     nonce: Cell<u32>,
+    reset_loop: bool,
 }
 
 impl Responder {
-    pub fn new() -> &'static Self {
-       let this=  Responder {nonce:Cell::new(0)};
+    pub fn new(reset_loop: bool) -> &'static Self {
+       let this=  Responder {nonce:Cell::new(0), reset_loop};
        Box::leak(Box::new(this))
     }
 
-    pub fn reset(&'static self) {
+    pub fn reset(&self) {
         self.nonce.set(self.nonce.get() + 1);
     }
 
-    pub fn get_nonce(&'static self) -> u32 {
+    pub fn get_nonce(&self) -> u32 {
         self.nonce.get()
+    }
+
+    pub fn get_loop(&self) -> bool {
+        self.reset_loop
     }
 }

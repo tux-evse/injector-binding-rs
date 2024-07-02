@@ -205,18 +205,21 @@ fn responder_req_cb(
     }
 
     if transac.queries.count()? == transac.sequence {
-        return afb_error!(
-            "responder-req-cb",
-            "invalid sequence number:{}",
-            transac.sequence
-        );
+        if transac.responder.get_loop() {
+            transac.sequence = 0
+        } else {
+            return afb_error!(
+                "responder-req-cb",
+                "invalid sequence number:{}",
+                transac.sequence
+            );
+        }
     };
 
     let received_query = args.get::<JsoncObj>(0)?;
     let expected_query = transac.queries.index(transac.sequence)?;
 
     let status = check_arguments(transac.sequence, &received_query, &expected_query)?;
-
     match status {
         SimulationStatus::Done | SimulationStatus::Check => {
             let expect = transac.expects.index::<JsoncObj>(transac.sequence)?;
@@ -245,11 +248,11 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
 
     for idx in 0..config.scenarios.count()? {
         let jscenario = config.scenarios.index::<JsoncObj>(idx)?;
-        let uid = jscenario.get::<&'static str>("uid")?;
-        let name = jscenario.default::<&'static str>("name", uid)?;
-        let info = jscenario.default::<&'static str>("info", "")?;
-        let timeout = jscenario.default::<i32>("timeout", DEFAULT_ISO_TIMEOUT)?;
-        let target = jscenario.get::<&'static str>("target")?;
+        let uid = jscenario.get("uid")?;
+        let name = jscenario.default("name", uid)?;
+        let info = jscenario.default("info", "")?;
+        let timeout = jscenario.default("timeout", DEFAULT_ISO_TIMEOUT)?;
+        let prefix = jscenario.default("prefix", name)?;
         let transactions = jscenario.get::<JsoncObj>("transactions")?;
         if !transactions.is_type(Jtype::Array) {
             return afb_error!(
@@ -260,7 +263,14 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
 
         let scenario_event = AfbEvent::new(uid);
         let scenario_verb = AfbVerb::new(uid);
-        let injector = Injector::new(uid, target, transactions, timeout, injector_req_cb)?;
+        let injector = Injector::new(
+            uid,
+            config.target,
+            prefix,
+            transactions,
+            timeout,
+            injector_req_cb,
+        )?;
         scenario_verb
             .set_name(name)
             .set_info(info)
@@ -293,7 +303,7 @@ fn create_responder_verb(
             queries: queries.clone(),
             expects,
             sequence: 0,
-            nonce:0,
+            nonce: 0,
             responder,
         });
 
@@ -322,7 +332,7 @@ fn responder_reset_cb(
 }
 
 fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<(), AfbError> {
-    let responder = Responder::new();
+    let responder = Responder::new(config.loop_reset);
     let responder_verb = AfbVerb::new("reset")
         .set_info("scenario sequence counter")
         .set_callback(responder_reset_cb)
@@ -345,7 +355,9 @@ fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Af
 
         // ignore empty scenario
         if transactions.count()? > 0 {
-            let scenario_group = AfbGroup::new(uid_scenario).set_prefix(name);
+            let scenario_group = AfbGroup::new(uid_scenario)
+                .set_separator(":")
+                .set_prefix(name);
 
             // sort jsonc transaction by uid/verb to process duplicate verbs
             transactions.sort(Some(scenario_sort_cb))?;

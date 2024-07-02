@@ -21,6 +21,8 @@ pub enum SimulationMode {
 pub struct BindingConfig {
     pub simulation: SimulationMode,
     pub scenarios: JsoncObj,
+    pub target: Option<&'static str>,
+    pub loop_reset: bool,
 }
 
 // Binding init callback started at binding load time before any API exist
@@ -38,6 +40,9 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
         other => return afb_error! ("simu-binding-config", "expected mode:'injector'|'responder' got:{}", other)
     };
 
+    let loop_reset= jconf.default("loop", true)?;
+    let target=  jconf.optional::<&'static str>("target")?;
+
     let scenarios =    jconf.get::<JsoncObj>("scenarios")?;
     if ! scenarios.is_type(Jtype::Array) {
         return afb_error! ("simu-binding-config", "scenarios should be a valid array of simulator messages")
@@ -46,6 +51,8 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
     let config = BindingConfig {
         simulation,
         scenarios: scenarios.clone(),
+        target,
+        loop_reset,
     };
     // create an register frontend api and register init session callback
     let api = AfbApi::new(api)
