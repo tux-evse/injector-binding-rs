@@ -123,37 +123,6 @@ fn check_arguments(
     Ok(SimulationStatus::Check)
 }
 
-fn injector_req_cb(
-    api: AfbApiV4,
-    transac: &mut InjectorEntry,
-    target: &'static str,
-) -> Result<SimulationStatus, AfbError> {
-    // injector_req_cb does not return AfbError
-    let mut query = AfbParams::new();
-    for idx in 0..transac.queries.count()? {
-        let jsonc = transac.queries.index::<JsoncObj>(idx)?;
-        query.push(jsonc.clone())?;
-    }
-
-    let response = AfbSubCall::call_sync(api, target, transac.verb, query)?;
-    let status = match transac.expects.count()? {
-        1 => {
-            // injector only use 1st expect element
-            let received = response.get::<JsoncObj>(0)?;
-            check_arguments(transac.sequence, &received, &transac.expects.index(0)?)?
-        }
-        0 => SimulationStatus::Done,
-        _ => {
-            return afb_error!(
-                "injector-req-cb",
-                "(hoops) injection scenario with multiple expect return element"
-            )
-        }
-    };
-
-    Ok(status)
-}
-
 pub struct ScenarioReqCtx {
     _uid: &'static str,
     evt: &'static AfbEvent,
@@ -192,6 +161,52 @@ fn scenario_action_cb(
     Ok(())
 }
 
+// call by jobpost when injector run a scenario
+fn injector_jobpost_cb(
+    api: AfbApiV4,
+    transac: &mut InjectorEntry,
+) -> Result<SimulationStatus, AfbError> {
+    let mut query = AfbParams::new();
+    for idx in 0..transac.queries.count()? {
+        let jsonc = transac.queries.index::<JsoncObj>(idx)?;
+        query.push(jsonc.clone())?;
+    }
+
+    let response = AfbSubCall::call_sync(api, transac.target, transac.verb, query)?;
+    let status = match transac.expects.count()? {
+        1 => {
+            // injector only use 1st expect element
+            let received = response.get::<JsoncObj>(0)?;
+            check_arguments(transac.sequence, &received, &transac.expects.index(0)?)?
+        }
+        0 => SimulationStatus::Done,
+        _ => {
+            return afb_error!(
+                "injector-req-cb",
+                "(hoops) injection scenario with multiple expect return element"
+            )
+        }
+    };
+
+    Ok(status)
+}
+
+// call when activating manually a specific scenario command
+fn injector_req_cb(
+    afb_rqt: &AfbRequest,
+    args: &AfbRqtData,
+    ctx: &AfbCtxData,
+) -> Result<(), AfbError> {
+    let transac = ctx.get_mut::<InjectorEntry>()?;
+    let query = args.get::<JsoncObj>(0)?;
+
+    let response = AfbSubCall::call_sync(afb_rqt, transac.target, transac.verb, query)?;
+    let argument = response.get::<JsoncObj>(0)?;
+    afb_rqt.reply(argument, 0);
+    Ok(())
+}
+
+// in responding mode send back by iteration count expected result
 fn responder_req_cb(
     afb_rqt: &AfbRequest,
     args: &AfbRqtData,
@@ -240,16 +255,181 @@ fn responder_req_cb(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum TransactionVerbCtx {
+    Responder(&'static Responder),
+    Injector(&'static Injector),
+}
+
+fn create_transaction_verb(
+    group: &mut AfbGroup,
+    verb: &'static str,
+    infos: JsoncObj,
+    queries: JsoncObj,
+    expects: JsoncObj,
+    callback: RqtCallback,
+    context: TransactionVerbCtx,
+    target: Option<&'static str>,
+) -> Result<(), AfbError> {
+    let transaction_verb = AfbVerb::new(verb)
+        .set_info(to_static_str(infos.to_string()))
+        .set_callback(callback);
+
+    match context {
+        TransactionVerbCtx::Responder(responder) => {
+            let context = ResponderEntry {
+                queries: queries.clone(),
+                expects,
+                sequence: 0,
+                nonce: 0,
+                responder,
+            };
+            transaction_verb.set_context(context);
+        }
+        TransactionVerbCtx::Injector(_) => {
+            let target_api= match target {
+                None => return afb_error! ("injector-create-verb", "config target api missing"),
+                Some(value) => value
+            };
+
+            let context = InjectorEntry {
+                queries: queries.clone(),
+                expects,
+                sequence: 0,
+                status: SimulationStatus::Ignored,
+                target: target_api,
+                uid: verb,
+                verb: verb,
+            };
+            transaction_verb.set_context(context);
+        }
+    }
+
+    for idx in 0..queries.count()? {
+        let info = infos.index::<&str>(idx)?;
+        let jsonc = JsoncObj::new();
+        jsonc.add("info", info)?;
+        for entry in queries.index::<JsoncObj>(idx)?.expand()? {
+            jsonc.add(&entry.key, entry.obj)?;
+        }
+        transaction_verb.add_sample(jsonc)?;
+    }
+    group.add_verb(transaction_verb.finalize()?);
+    Ok(())
+}
+
+fn create_transaction_group(
+    transactions: JsoncObj,
+    uid_scenario: &'static str,
+    name_scenario: &'static str,
+    callback: RqtCallback,
+    context: TransactionVerbCtx,
+    target: Option<&'static str>,
+) -> Result<&'static AfbGroup, AfbError> {
+    let scenario_group = AfbGroup::new(uid_scenario)
+        .set_separator(":")
+        .set_prefix(name_scenario);
+
+    // sort jsonc transaction by uid/verb to process duplicate verbs
+    transactions.sort(Some(scenario_sort_cb))?;
+
+    let mut previous_verb = "";
+    let mut infos = JsoncObj::array();
+    let mut queries = JsoncObj::array();
+    let mut expects = JsoncObj::array();
+
+    for idx in 0..transactions.count()? {
+        // extract data from transaction
+        let transac = transactions.index::<JsoncObj>(idx)?;
+        let transac_uid = transac.get::<&'static str>("uid")?;
+        let query = match transac.optional::<JsoncObj>("query")? {
+            Some(value) => value,
+            None => JsoncObj::new(),
+        };
+        let expect = match transac.optional::<JsoncObj>("expect")? {
+            Some(value) => value,
+            None => JsoncObj::new(),
+        };
+
+        // build verb from transaction uid
+        let current_verb = transaction_get_verb(&transac)?;
+
+        // ignore injector_only verbs as service discovery
+        if transac.default("injector_only", false)? {
+            afb_log_msg!(
+                Notice,
+                None,
+                "uid:{} scenario:{} verb:{} ignored (injector_only==true)",
+                uid_scenario,
+                transac_uid,
+                current_verb
+            );
+            continue;
+        }
+
+        if previous_verb != current_verb {
+            // if exist create previous_label verb scenario
+            if previous_verb.len() != 0 {
+                create_transaction_verb(
+                    scenario_group,
+                    previous_verb,
+                    infos,
+                    queries,
+                    expects,
+                    callback,
+                    context,
+                    target,
+                )?;
+            }
+            // prepare structure for new scenario verb
+            infos = JsoncObj::array();
+            queries = JsoncObj::array();
+            expects = JsoncObj::array();
+            previous_verb = current_verb;
+        }
+
+        infos.append(transac_uid)?;
+        queries.append(query)?;
+        expects.append(expect)?;
+    }
+    // add last verb
+    create_transaction_verb(
+        scenario_group,
+        previous_verb,
+        infos,
+        expects,
+        queries,
+        callback,
+        context,
+        target,
+    )?;
+
+    Ok(scenario_group.finalize()?)
+}
+
 fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), AfbError> {
     scenario_actions::register()?;
 
     for idx in 0..config.scenarios.count()? {
         let jscenario = config.scenarios.index::<JsoncObj>(idx)?;
-        let uid = jscenario.get::<&'static str>("uid")?;
-        let name = jscenario.default::<&'static str>("name", uid)?;
-        let info = jscenario.default::<&'static str>("info", "")?;
-        let timeout = jscenario.default::<i32>("timeout", DEFAULT_ISO_TIMEOUT)?;
-        let target = jscenario.get::<&'static str>("target")?;
+        let uid = jscenario.get("uid")?;
+        let name = jscenario.default("name", uid)?;
+        let info = jscenario.default("info", "")?;
+        let protocol = jscenario.get("protocol")?;
+
+        let retry_conf= match jscenario.optional::<JsoncObj>("protocol")? {
+            None => InjectorRetryConf{
+                delay: 100,
+                timeout: DEFAULT_ISO_TIMEOUT,
+                count: 1,
+            },
+            Some(jretry) => InjectorRetryConf{
+                delay: jretry.default("delay", 100)?,
+                timeout: jretry.default("timeout", DEFAULT_ISO_TIMEOUT)?,
+                count: jretry.default("count", 1)?,
+            }
+        };
+
         let transactions = jscenario.get::<JsoncObj>("transactions")?;
         if !transactions.is_type(Jtype::Array) {
             return afb_error!(
@@ -260,7 +440,14 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
 
         let scenario_event = AfbEvent::new(uid);
         let scenario_verb = AfbVerb::new(uid);
-        let injector = Injector::new(uid, target, transactions, timeout, injector_req_cb)?;
+        let injector = Injector::new(
+            uid,
+            config.target,
+            protocol,
+            transactions.clone(),
+            retry_conf,
+            injector_jobpost_cb,
+        )?;
         scenario_verb
             .set_name(name)
             .set_info(info)
@@ -274,39 +461,20 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
             });
         api.add_verb(scenario_verb.finalize()?);
         api.add_event(scenario_event);
-    }
-    Ok(())
-}
 
-fn create_responder_verb(
-    group: &mut AfbGroup,
-    uid: &'static str,
-    infos: JsoncObj,
-    queries: JsoncObj,
-    expects: JsoncObj,
-    responder: &'static Responder,
-) -> Result<(), AfbError> {
-    let responder_verb = AfbVerb::new(uid)
-        .set_info(to_static_str(infos.to_string()))
-        .set_callback(responder_req_cb)
-        .set_context(ResponderEntry {
-            queries: queries.clone(),
-            expects,
-            sequence: 0,
-            nonce:0,
-            responder,
-        });
-
-    for idx in 0..queries.count()? {
-        let info = infos.index::<&str>(idx)?;
-        let jsonc = JsoncObj::new();
-        jsonc.add("info", info)?;
-        for entry in queries.index::<JsoncObj>(idx)?.expand()? {
-            jsonc.add(&entry.key, entry.obj)?;
+        // create a group by scenario with one verb per transaction
+        if transactions.count()? > 0 {
+            let transaction_group = create_transaction_group(
+                transactions,
+                uid,
+                name,
+                injector_req_cb,
+                TransactionVerbCtx::Injector(injector),
+                config.target,
+            )?;
+            api.add_group(transaction_group);
         }
-        responder_verb.add_sample(jsonc)?;
     }
-    group.add_verb(responder_verb.finalize()?);
     Ok(())
 }
 
@@ -343,80 +511,17 @@ fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Af
             );
         }
 
-        // ignore empty scenario
+        // create a group by scenario with one verb per transaction
         if transactions.count()? > 0 {
-            let scenario_group = AfbGroup::new(uid_scenario).set_prefix(name);
-
-            // sort jsonc transaction by uid/verb to process duplicate verbs
-            transactions.sort(Some(scenario_sort_cb))?;
-
-            let mut previous_verb = "";
-            let mut infos = JsoncObj::array();
-            let mut queries = JsoncObj::array();
-            let mut expects = JsoncObj::array();
-
-            for idx in 0..transactions.count()? {
-                // extract data from transaction
-                let transac = transactions.index::<JsoncObj>(idx)?;
-                let transac_uid = transac.get::<&'static str>("uid")?;
-                let query = match transac.optional::<JsoncObj>("query")? {
-                    Some(value) => value,
-                    None => JsoncObj::new(),
-                };
-                let expect = match transac.optional::<JsoncObj>("expect")? {
-                    Some(value) => value,
-                    None => JsoncObj::new(),
-                };
-
-                // build verb from transaction uid
-                let current_verb = transaction_get_verb(&transac)?;
-
-                // ignore injector_only verbs as service discovery
-                if transac.default("injector_only", false)? {
-                    afb_log_msg!(
-                        Notice,
-                        None,
-                        "uid:{} scenario:{} verb:{} ignored (injector_only==true)",
-                        uid_scenario,
-                        transac_uid,
-                        current_verb
-                    );
-                    continue;
-                }
-
-                if previous_verb != current_verb {
-                    // if exist create previous_label verb scenario
-                    if previous_verb.len() != 0 {
-                        create_responder_verb(
-                            scenario_group,
-                            previous_verb,
-                            infos,
-                            queries,
-                            expects,
-                            responder,
-                        )?;
-                    }
-                    // prepare structure for new scenario verb
-                    infos = JsoncObj::array();
-                    queries = JsoncObj::array();
-                    expects = JsoncObj::array();
-                    previous_verb = current_verb;
-                }
-
-                infos.append(transac_uid)?;
-                queries.append(query)?;
-                expects.append(expect)?;
-            }
-            // add last verb
-            create_responder_verb(
-                scenario_group,
-                previous_verb,
-                infos,
-                queries,
-                expects,
-                responder,
+            let transaction_group = create_transaction_group(
+                transactions,
+                uid_scenario,
+                name,
+                responder_req_cb,
+                TransactionVerbCtx::Responder(responder),
+                None,
             )?;
-            api.add_group(scenario_group.finalize()?);
+            api.add_group(transaction_group);
         }
     }
     Ok(())

@@ -11,26 +11,30 @@
  */
 
 use afbv4::prelude::*;
-use std::sync::{Mutex, MutexGuard};
 use std::cell::Cell;
+use std::sync::{Mutex, MutexGuard};
 
-pub type InjectorReqCb = fn(
-    api: AfbApiV4,
-    transac: &mut InjectorEntry,
-    target: &'static str,
-) -> Result<SimulationStatus, AfbError>;
+pub type InjectorJobPostCb =
+    fn(api: AfbApiV4, transac: &mut InjectorEntry) -> Result<SimulationStatus, AfbError>;
 
 pub struct JobTransactionContext {
     event: &'static AfbEvent,
-    target: &'static str,
-    callback: InjectorReqCb,
+    callback: InjectorJobPostCb,
     running: bool,
+    retry_conf: InjectorRetryConf,
 }
 
 pub struct JobTransactionParam<'a> {
     api: AfbApiV4,
     idx: usize,
     state: MutexGuard<'a, ScenarioState>,
+}
+
+#[derive(Clone, Copy)]
+pub struct InjectorRetryConf {
+    pub delay: i32,
+    pub timeout: i32,
+    pub count: i32,
 }
 
 fn job_transaction_cb(
@@ -48,13 +52,16 @@ fn job_transaction_cb(
         let error = AfbError::new(
             "job-transaction-cb",
             -62,
-            format!("{}:{} timeout", ctx.target, transac.uid),
+            format!("{} timeout", transac.uid),
         );
 
         // send result as event
         let jreply = JsoncObj::new();
         jreply.add("uid", transac.uid)?;
-        jreply.add("status", format!("{:?}", SimulationStatus::Timeout).as_str())?;
+        jreply.add(
+            "status",
+            format!("{:?}", SimulationStatus::Timeout).as_str(),
+        )?;
         ctx.event.push(jreply);
 
         transac.status = SimulationStatus::Fail(error);
@@ -67,25 +74,37 @@ fn job_transaction_cb(
         );
     }
 
-    let response = if ctx.running {
-        transac.status = SimulationStatus::Pending;
-        transac.status = (ctx.callback)(param.api, &mut transac, ctx.target)?;
-        match &transac.status {
-            SimulationStatus::Done | SimulationStatus::Check => {
-                Ok(())
+    if ctx.running {
+        for idx in 0..ctx.retry_conf.count {
+            transac.status = SimulationStatus::Pending;
+            transac.status = (ctx.callback)(param.api, &mut transac)?;
+            match &transac.status {
+                SimulationStatus::Done | SimulationStatus::Check => break,
+                SimulationStatus::Fail(_error) => {}
+                _ => {
+                    return afb_error!(
+                        "job_transaction_cb",
+                        "unexpected status for uid:{} count:{}",
+                        transac.uid,
+                        idx
+                    )
+                }
             }
-            SimulationStatus::Fail(_error) => {
-                ctx.running = false;
-                Ok(())
-            }
-            _ => afb_error!(
-                "job_transaction_cb",
-                "unexpected status for uid:{}",
-                transac.uid
-            ),
         }
+        ctx.running = false;
     } else {
         transac.status = SimulationStatus::Ignored;
+    };
+
+    let response = if let SimulationStatus::Fail(error) = &transac.status {
+        afb_error!(
+            "job_transaction_cb",
+            "unexpected status for uid:{} count:{} error:{}",
+            transac.uid,
+            ctx.retry_conf.count,
+            error
+        )
+    } else {
         Ok(())
     };
 
@@ -100,9 +119,8 @@ fn job_transaction_cb(
 }
 
 pub struct JobScenarioContext {
-    target: &'static str,
-    callback: InjectorReqCb,
-    timeout: i32,
+    callback: InjectorJobPostCb,
+    retry_conf: InjectorRetryConf,
     count: usize,
 }
 
@@ -127,17 +145,19 @@ fn job_scenario_cb(
         return Ok(());
     }
 
+    // compute global timeout in case count > 1
+    let timeout = ctx.retry_conf.timeout * ctx.retry_conf.count;
+
     let job = AfbSchedJob::new("iso15118-transac")
-        .set_exec_watchdog(ctx.timeout)
+        .set_exec_watchdog(timeout)
         .set_group(1)
         .set_callback(job_transaction_cb)
         .set_context(JobTransactionContext {
-            target: ctx.target,
             event: param.event,
             callback: ctx.callback,
             running: true,
+            retry_conf: ctx.retry_conf,
         })
-        .set_exec_watchdog(ctx.timeout)
         .finalize();
 
     for idx in 0..ctx.count {
@@ -163,11 +183,12 @@ pub enum SimulationStatus {
     Ignored,
     Idle,
     Timeout,
-    Fail(AfbError)
+    Fail(AfbError),
 }
 
 pub struct InjectorEntry {
     pub uid: &'static str,
+    pub target: &'static str,
     pub verb: &'static str,
     pub queries: JsoncObj,
     pub expects: JsoncObj,
@@ -189,30 +210,36 @@ pub struct Injector {
 impl Injector {
     pub fn new(
         uid: &'static str,
-        target: &'static str,
+        target: Option<&'static str>,
+        protocol: &'static str,
         config: JsoncObj,
-        timeout: i32,
-        callback: InjectorReqCb,
+        retry_conf: InjectorRetryConf,
+        callback: InjectorJobPostCb,
     ) -> Result<&'static Self, AfbError> {
         let mut data_set = ScenarioState {
             entries: Vec::new(),
         };
 
+        let target = match target {
+            Some(value) => value,
+            None => return afb_error!("injector-new", "missing target api from config"),
+        };
+
         for idx in 0..config.count()? {
             let transac = config.index::<JsoncObj>(idx)?;
             let uid = transac.get::<&str>("uid")?;
-            let queries= JsoncObj::array();
+            let queries = JsoncObj::array();
             if let Some(value) = transac.optional::<JsoncObj>("query")? {
                 queries.append(value)?;
             }
-            let expects= JsoncObj::array();
-            if let Some(value) = transac.optional::<JsoncObj>("expext")? {
+            let expects = JsoncObj::array();
+            if let Some(value) = transac.optional::<JsoncObj>("expect")? {
                 expects.append(value)?;
             }
             let verb = match transac.optional::<&'static str>("verb")? {
                 Some(value) => value,
                 None => {
-                    let name = format!("{}_req", uid.replace("-", "_"));
+                    let name = format!("{}:{}_req", protocol, uid.replace("-", "_"));
                     to_static_str(name)
                 }
             };
@@ -220,18 +247,18 @@ impl Injector {
             data_set.entries.push(InjectorEntry {
                 uid,
                 verb,
-                queries: JsoncObj::array(),
-                expects: JsoncObj::array(),
+                queries: queries,
+                expects: expects,
                 status: SimulationStatus::Idle,
                 sequence: 0,
+                target,
             });
         }
 
         let job = AfbSchedJob::new("iso-15118-Injector")
             .set_callback(job_scenario_cb)
             .set_context(JobScenarioContext {
-                target,
-                timeout,
+                retry_conf,
                 callback,
                 count: data_set.entries.len(),
             });
@@ -277,14 +304,20 @@ impl Injector {
 
     pub fn get_result(&self) -> Result<JsoncObj, AfbError> {
         let state = self.lock_state()?;
-        let result= JsoncObj::array();
+        let result = JsoncObj::array();
         result.append(format!("1..{} # {}", self.count, self.uid).as_str())?;
         for idx in 0..self.count {
             let transac = &state.entries[idx];
-            let status= match &transac.status {
-                SimulationStatus::Done =>  format!("ok {} - {}  # Response uncheck", idx, transac.uid),
-                SimulationStatus::Check => format!("ok {} - {}  # Response checked", idx, transac.uid),
-                SimulationStatus::Fail(error) => format!("fx {} - {}  # {}", idx, transac.uid, error),
+            let status = match &transac.status {
+                SimulationStatus::Done => {
+                    format!("ok {} - {}  # Response uncheck", idx, transac.uid)
+                }
+                SimulationStatus::Check => {
+                    format!("ok {} - {}  # Response checked", idx, transac.uid)
+                }
+                SimulationStatus::Fail(error) => {
+                    format!("fx {} - {}  # {}", idx, transac.uid, error)
+                }
                 _ => format!("fx {} - {}  # {:?}", idx, transac.uid, transac.status),
             };
             result.append(status.as_str())?;
@@ -302,7 +335,7 @@ pub struct ResponderEntry {
 }
 
 pub struct ResponderReset {
-   pub responder: &'static Responder
+    pub responder: &'static Responder,
 }
 
 pub struct Responder {
@@ -311,8 +344,10 @@ pub struct Responder {
 
 impl Responder {
     pub fn new() -> &'static Self {
-       let this=  Responder {nonce:Cell::new(0)};
-       Box::leak(Box::new(this))
+        let this = Responder {
+            nonce: Cell::new(0),
+        };
+        Box::leak(Box::new(this))
     }
 
     pub fn reset(&'static self) {

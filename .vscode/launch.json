@@ -15,7 +15,7 @@
                 "SIMULATION_MODE": "injector",
             },
             "args": [
-                "-vv",
+                "-v",
                 "--monitoring",
                 "--port=1234",
                 "--trap-faults=0",
@@ -56,7 +56,7 @@
             ]
         },
                 {
-            "name": "pcap-injector",
+            "name": "small-dc-injector",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
@@ -69,7 +69,7 @@
                 "SIMULATION_MODE": "injector",
             },
             "args": [
-                "-vv",
+                "-v",
                 "--monitoring",
                 "--port=1234",
                 "--trap-faults=0",
@@ -83,7 +83,7 @@
             ]
         },
                 {
-            "name": "pcap-responder",
+            "name": "small-dc-responder",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
