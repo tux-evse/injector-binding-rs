@@ -220,18 +220,21 @@ fn responder_req_cb(
     }
 
     if transac.queries.count()? == transac.sequence {
-        return afb_error!(
-            "responder-req-cb",
-            "invalid sequence number:{}",
-            transac.sequence
-        );
+        if transac.responder.get_loop() {
+            transac.sequence = 0
+        } else {
+            return afb_error!(
+                "responder-req-cb",
+                "invalid sequence number:{}",
+                transac.sequence
+            );
+        }
     };
 
     let received_query = args.get::<JsoncObj>(0)?;
     let expected_query = transac.queries.index(transac.sequence)?;
 
     let status = check_arguments(transac.sequence, &received_query, &expected_query)?;
-
     match status {
         SimulationStatus::Done | SimulationStatus::Check => {
             let expect = transac.expects.index::<JsoncObj>(transac.sequence)?;

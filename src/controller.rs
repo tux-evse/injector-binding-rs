@@ -249,6 +249,8 @@ impl Injector {
                 verb,
                 queries: queries,
                 expects: expects,
+                queries: queries,
+                expects: expects,
                 status: SimulationStatus::Idle,
                 sequence: 0,
                 target,
@@ -266,7 +268,7 @@ impl Injector {
         let this = Self {
             uid,
             job,
-            count: config.count()?,
+            count: transactions.count()?,
             data_set: Mutex::new(data_set),
         };
 
@@ -340,6 +342,7 @@ pub struct ResponderReset {
 
 pub struct Responder {
     nonce: Cell<u32>,
+    reset_loop: bool,
 }
 
 impl Responder {
@@ -350,11 +353,15 @@ impl Responder {
         Box::leak(Box::new(this))
     }
 
-    pub fn reset(&'static self) {
+    pub fn reset(&self) {
         self.nonce.set(self.nonce.get() + 1);
     }
 
-    pub fn get_nonce(&'static self) -> u32 {
+    pub fn get_nonce(&self) -> u32 {
         self.nonce.get()
+    }
+
+    pub fn get_loop(&self) -> bool {
+        self.reset_loop
     }
 }

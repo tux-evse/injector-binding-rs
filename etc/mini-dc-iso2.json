@@ -6,10 +6,17 @@
             "api": "iso15118-${SIMULATION_MODE}",
             "path": "${CARGO_BINDING_DIR}/libafb_injector.so",
             "simulation": "${SIMULATION_MODE}",
+<<<<<<< HEAD
             "target": "iso15118-simulator",
             "scenarios": [
                 {
                     "uid": "mini-dc-iso2:1",
+=======
+            "target": "iso15118-api",
+            "scenarios": [
+                {
+                    "uid": "scenario:15118/iso2/1",
+>>>>>>> 1e1a2ef488acdd8c3e2a3539380a953e4f47b170
                     "protocol": "iso2",
                     "transactions": [
                         {
@@ -17,6 +24,7 @@
                             "verb": "iso2:sdp_evse_req",
                             "injector_only": true,
                             "query": {
+<<<<<<< HEAD
                                 "action": "discover"
                             }
                         },
@@ -24,6 +32,10 @@
                             "uid": "app-set-protocol",
                             "verb": "iso2:app_proto_req",
                             "injector_only": true
+=======
+                                "action": "discovery"
+                            }
+>>>>>>> 1e1a2ef488acdd8c3e2a3539380a953e4f47b170
                         },
                         {
                             "uid": "pkg:51",
