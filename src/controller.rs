@@ -212,7 +212,7 @@ impl Injector {
         uid: &'static str,
         target: Option<&'static str>,
         protocol: &'static str,
-        config: JsoncObj,
+        transactions: JsoncObj,
         retry_conf: InjectorRetryConf,
         callback: InjectorJobPostCb,
     ) -> Result<&'static Self, AfbError> {
@@ -222,11 +222,11 @@ impl Injector {
 
         let target = match target {
             Some(value) => value,
-            None => return afb_error!("injector-new", "missing target api from config"),
+            None => return afb_error!("injector-new", "missing target api from transactions"),
         };
 
-        for idx in 0..config.count()? {
-            let transac = config.index::<JsoncObj>(idx)?;
+        for idx in 0..transactions.count()? {
+            let transac = transactions.index::<JsoncObj>(idx)?;
             let uid = transac.get::<&str>("uid")?;
             let queries = JsoncObj::array();
             if let Some(value) = transac.optional::<JsoncObj>("query")? {
@@ -247,10 +247,8 @@ impl Injector {
             data_set.entries.push(InjectorEntry {
                 uid,
                 verb,
-                queries: queries,
-                expects: expects,
-                queries: queries,
-                expects: expects,
+                queries,
+                expects,
                 status: SimulationStatus::Idle,
                 sequence: 0,
                 target,
@@ -342,13 +340,14 @@ pub struct ResponderReset {
 
 pub struct Responder {
     nonce: Cell<u32>,
-    reset_loop: bool,
+    loop_reset: bool,
 }
 
 impl Responder {
-    pub fn new() -> &'static Self {
+    pub fn new(loop_reset: bool) -> &'static Self {
         let this = Responder {
             nonce: Cell::new(0),
+            loop_reset,
         };
         Box::leak(Box::new(this))
     }
@@ -362,6 +361,6 @@ impl Responder {
     }
 
     pub fn get_loop(&self) -> bool {
-        self.reset_loop
+        self.loop_reset
     }
 }

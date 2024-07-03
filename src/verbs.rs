@@ -493,7 +493,7 @@ fn responder_reset_cb(
 }
 
 fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<(), AfbError> {
-    let responder = Responder::new();
+    let responder = Responder::new(config.loop_reset);
     let responder_verb = AfbVerb::new("reset")
         .set_info("scenario sequence counter")
         .set_callback(responder_reset_cb)
