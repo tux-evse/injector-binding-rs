@@ -211,7 +211,7 @@ impl Injector {
     pub fn new(
         uid: &'static str,
         target: Option<&'static str>,
-        protocol: &'static str,
+        prefix: &'static str,
         transactions: JsoncObj,
         retry_conf: InjectorRetryConf,
         callback: InjectorJobPostCb,
@@ -239,7 +239,7 @@ impl Injector {
             let verb = match transac.optional::<&'static str>("verb")? {
                 Some(value) => value,
                 None => {
-                    let name = format!("{}:{}_req", protocol, uid.replace("-", "_"));
+                    let name = format!("{}:{}_req", prefix, uid.replace("-", "_"));
                     to_static_str(name)
                 }
             };

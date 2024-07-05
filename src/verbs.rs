@@ -418,7 +418,7 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
         let uid = jscenario.get("uid")?;
         let name = jscenario.default("name", uid)?;
         let info = jscenario.default("info", "")?;
-        let protocol = jscenario.get("protocol")?;
+        let prefix = jscenario.default("prefix", uid)?;
 
         let retry_conf= match jscenario.optional::<JsoncObj>("protocol")? {
             None => InjectorRetryConf{
@@ -446,7 +446,7 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
         let injector = Injector::new(
             uid,
             config.target,
-            protocol,
+            prefix,
             transactions.clone(),
             retry_conf,
             injector_jobpost_cb,
