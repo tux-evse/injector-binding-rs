@@ -74,13 +74,36 @@ fn job_transaction_cb(
         );
     }
 
-    if ctx.running {
+    // send result as event
+    let jreply = JsoncObj::new();
+    jreply.add("uid", transac.uid)?;
+    jreply.add("verb", transac.verb)?;
+
+    if !ctx.running {
         for idx in 0..ctx.retry_conf.count {
             transac.status = SimulationStatus::Pending;
-            transac.status = (ctx.callback)(param.api, &mut transac)?;
+            transac.status = match (ctx.callback)(param.api, &mut transac)
+            {
+                Ok(value)=> value,
+                Err(error) => {
+                    // api/verb did not return
+                    jreply.add("error", error.to_jsonc()?)?;
+                    ctx.event.push(jreply.clone());
+                    return afb_error!(
+                        "job_transaction_cb",
+                        "callsync fail {}",
+                        error
+                    )
+                }
+            };
             match &transac.status {
                 SimulationStatus::Done | SimulationStatus::Check => break,
-                SimulationStatus::Fail(_error) => {}
+                SimulationStatus::Fail(error) => {
+                    // api/verb return invalid values
+                    jreply.add("error", error.to_jsonc()?)?;
+                    ctx.event.push(jreply.clone());
+                    break;
+                }
                 _ => {
                     return afb_error!(
                         "job_transaction_cb",
@@ -93,7 +116,7 @@ fn job_transaction_cb(
         }
         ctx.running = false;
     } else {
-        transac.status = SimulationStatus::Ignored;
+        transac.status = SimulationStatus::InvalidSequence;
     };
 
     let response = if let SimulationStatus::Fail(error) = &transac.status {
@@ -108,12 +131,8 @@ fn job_transaction_cb(
         Ok(())
     };
 
-    // send result as event
-    let jreply = JsoncObj::new();
-    jreply.add("uid", transac.uid)?;
-    jreply.add("verb", transac.verb)?;
-    jreply.add("status", format!("{:?}", transac.status).as_str())?;
-    ctx.event.push(jreply);
+    jreply.add("status", format!("{:?}", &transac.status).as_str())?;
+    ctx.event.push(jreply.clone());
     jobctx.free::<JobTransactionParam>();
     response
 }
@@ -155,7 +174,7 @@ fn job_scenario_cb(
         .set_context(JobTransactionContext {
             event: param.event,
             callback: ctx.callback,
-            running: true,
+            running: false,
             retry_conf: ctx.retry_conf,
         })
         .finalize();
@@ -180,7 +199,7 @@ pub enum SimulationStatus {
     Pending,
     Done,
     Check,
-    Ignored,
+    InvalidSequence,
     Idle,
     Timeout,
     Fail(AfbError),
@@ -286,7 +305,7 @@ impl Injector {
     ) -> Result<i32, AfbError> {
         let api = afb_rqt.get_apiv4();
         let job_id = self.job.post(
-            1,
+            100, // 100ms start delay
             JobScenarioParam {
                 injector: self,
                 event,
@@ -310,10 +329,10 @@ impl Injector {
             let transac = &state.entries[idx];
             let status = match &transac.status {
                 SimulationStatus::Done => {
-                    format!("ok {} - {}  # Response uncheck", idx, transac.uid)
+                    format!("ok {} - {}  # Ok(Done)", idx, transac.uid)
                 }
                 SimulationStatus::Check => {
-                    format!("ok {} - {}  # Response checked", idx, transac.uid)
+                    format!("ok {} - {}  # Ok(Checked)", idx, transac.uid)
                 }
                 SimulationStatus::Fail(error) => {
                     format!("fx {} - {}  # {}", idx, transac.uid, error)

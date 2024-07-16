@@ -15,7 +15,7 @@ use afbv4::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
-const DEFAULT_ISO_TIMEOUT: i32 = 1000; // call_sync ms default timeout
+const DEFAULT_ISO_TIMEOUT: i32 = 5; // call_sync 5s default timeout
 
 AfbDataConverter!(scenario_actions, ScenarioAction);
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -75,15 +75,15 @@ fn cmp_entry<'a>(value: &'a Jentry, expect: &Jentry) -> Option<&'a Jentry> {
 
 fn check_arguments(
     sequence: usize,
-    received: &JsoncObj,
-    expected: &JsoncObj,
+    jreceived: &JsoncObj,
+    jexpected: &JsoncObj,
 ) -> Result<SimulationStatus, AfbError> {
     // move from jsonc to a rust vector of json object
-    let received = received.expand()?;
-    let expected = expected.expand()?;
+    let received = jreceived.expand()?;
+    let expected = jexpected.expand()?;
 
     if expected.len() == 0 {
-        return Ok(SimulationStatus::Ignored);
+        return Ok(SimulationStatus::InvalidSequence);
     }
 
     for idx in 0..expected.len() {
@@ -91,8 +91,8 @@ fn check_arguments(
         let received_entry = match received.iter().find_map(|s| cmp_entry(s, expected_entry)) {
             None => {
                 return afb_error!(
-                    "simu-check-response",
-                    format!("seq:{} fail to find key:{}", sequence, expected_entry.key)
+                    "simu-check-arguments",
+                    format!("seq:{} fail to find key:{} query:{}", sequence, expected_entry.key, jreceived)
                 )
             }
             Some(value) => value,
@@ -103,7 +103,7 @@ fn check_arguments(
             let response = check_arguments(sequence, &received_entry.obj, &expected_entry.obj);
             match check_arguments(sequence, &received_entry.obj, &expected_entry.obj)? {
                 SimulationStatus::Check => {}
-                SimulationStatus::Ignored => {}
+                SimulationStatus::InvalidSequence => {}
                 _ => return response,
             }
         }
@@ -111,7 +111,7 @@ fn check_arguments(
         // check both received & expected value match
         if let Err(_error) = received_entry.obj.clone().equal(expected_entry.obj.clone()) {
             return afb_error!(
-                "simu-check-response",
+                "simu-check-arguments",
                 "seq:{} fail key:'{}' value:{}!={}",
                 sequence,
                 expected_entry.key,
@@ -172,6 +172,7 @@ fn injector_jobpost_cb(
         query.push(jsonc.clone())?;
     }
 
+    afb_log_msg!(Debug, api, "api:{} verb:{}", transac.target, transac.verb);
     let response = AfbSubCall::call_sync(api, transac.target, transac.verb, query)?;
     let status = match transac.expects.count()? {
         1 => {
@@ -225,8 +226,9 @@ fn responder_req_cb(
         } else {
             return afb_error!(
                 "responder-req-cb",
-                "invalid sequence number:{}",
-                transac.sequence
+                "invalid sequence expected:{} got:{}",
+                transac.sequence,
+                transac.queries.count()?
             );
         }
     };
@@ -299,7 +301,7 @@ fn create_transaction_verb(
                 queries: queries.clone(),
                 expects,
                 sequence: 0,
-                status: SimulationStatus::Ignored,
+                status: SimulationStatus::InvalidSequence,
                 target: target_api,
                 uid: verb,
                 verb: verb,
@@ -400,8 +402,8 @@ fn create_transaction_group(
         scenario_group,
         previous_verb,
         infos,
-        expects,
         queries,
+        expects,
         callback,
         context,
         target,
