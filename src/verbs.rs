@@ -422,7 +422,7 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
         let info = jscenario.default("info", "")?;
         let prefix = jscenario.default("prefix", uid)?;
 
-        let retry_conf= match jscenario.optional::<JsoncObj>("protocol")? {
+        let retry_conf= match jscenario.optional::<JsoncObj>("retry")? {
             None => InjectorRetryConf{
                 delay: 100,
                 timeout: DEFAULT_ISO_TIMEOUT,
