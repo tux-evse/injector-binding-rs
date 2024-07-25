@@ -12,9 +12,6 @@
 
 use crate::prelude::*;
 use afbv4::prelude::*;
-use std::time;
-
-const DEFAULT_CALL_TIMEOUT: i32 = 5; // call_sync 5s default timeout
 
 pub enum SimulationMode {
     Responder,
@@ -26,6 +23,7 @@ pub struct BindingConfig {
     pub scenarios: JsoncObj,
     pub target: Option<&'static str>,
     pub loop_reset: bool,
+    pub delay_conf: InjectorDelayConf,
     pub retry_conf: InjectorRetryConf,
 }
 
@@ -62,16 +60,13 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
     }
 
     let retry_conf = match jconf.optional::<JsoncObj>("retry")? {
-        None => InjectorRetryConf {
-            delay: time::Duration::from_millis(100),
-            timeout: DEFAULT_CALL_TIMEOUT,
-            count: 1,
-        },
-        Some(jretry) => InjectorRetryConf {
-            delay: time::Duration::from_millis(jretry.default("delay", 100)?),
-            timeout: jretry.default("timeout", DEFAULT_CALL_TIMEOUT)?,
-            count: jretry.default("count", 10)?,
-        },
+        None => InjectorRetryConf::default(),
+        Some(jretry) => InjectorRetryConf::from_jsonc(jretry)?
+    };
+
+    let delay_conf = match jconf.optional::<JsoncObj>("delay")? {
+        None => InjectorDelayConf::default(),
+        Some(jretry) => InjectorDelayConf::from_jsonc(jretry)?
     };
 
     let config = BindingConfig {
@@ -79,6 +74,7 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
         scenarios: scenarios.clone(),
         target,
         loop_reset,
+        delay_conf,
         retry_conf,
     };
     // create an register frontend api and register init session callback

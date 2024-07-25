@@ -1,7 +1,7 @@
 {
     "version": "0.2.0",
     "configurations": [
-                        {
+        {
             "name": "simple-injector",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
@@ -55,8 +55,8 @@
                 "settings set target.disable-aslr false"
             ]
         },
-                {
-            "name": "small-dc-injector",
+        {
+            "name": "evcc-compact-15118",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
@@ -64,17 +64,16 @@
             "env": {
                 "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
                 "LD_LIBRARY_PATH": "/usr/local/lib64",
-                "IFACE_SIMU": "lo",
-                "SIMULATION_PORT": "1234",
+                "IFACE_SIMU": "evcc-veth",
+                "PKI_TLS_DIR": "../iso15118-simulator-rs/afb-test/certs",
                 "SIMULATION_MODE": "injector",
             },
             "args": [
                 "-v",
                 "--monitoring",
-                "--port=1234",
                 "--trap-faults=0",
-                "--config=etc/binder-injector.yaml",
-                "--config=etc/mini-dc-iso2.json",
+                "--config=../iso15118-simulator-rs/afb-evcc/etc/binding-simu15118-evcc.yaml",
+                "--config=../iso15118-simulator-rs/afb-test/etc/compact-dc-iso2.json",
             ],
             "cwd": "${workspaceFolder}",
             "initCommands": [
@@ -82,33 +81,5 @@
                 "settings set target.disable-aslr false"
             ]
         },
-                {
-            "name": "small-dc-responder",
-            "type": "lldb",
-            "preLaunchTask": "binding-native-build",
-            "request": "launch",
-            "program": "afb-binder",
-            "env": {
-                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
-                "LD_LIBRARY_PATH": "/usr/local/lib64",
-                "IFACE_SIMU": "lo",
-                "SIMULATION_PORT": "1235",
-                "SIMULATION_MODE": "responder",
-            },
-            "args": [
-                "-v",
-                "--monitoring",
-                "--trap-faults=0",
-                "--port=1235",
-                "--config=etc/binder-injector.yaml",
-                "--config=etc/mini-dc-iso2.json",
-            ],
-            "cwd": "${workspaceFolder}",
-            "initCommands": [
-                "target stop-hook add -n _start -o continue",
-                "settings set target.disable-aslr false"
-            ]
-        },
-
     ]
 }

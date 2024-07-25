@@ -14,6 +14,8 @@ use crate::prelude::*;
 use afbv4::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time;
 
 AfbDataConverter!(scenario_actions, ScenarioAction);
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -90,7 +92,10 @@ fn check_arguments(
             None => {
                 return afb_error!(
                     "simu-check-arguments",
-                    format!("seq:{} fail to find key:{} query:{}", sequence, expected_entry.key, jreceived)
+                    format!(
+                        "seq:{} fail to find key:{} query:{}",
+                        sequence, expected_entry.key, jreceived
+                    )
                 )
             }
             Some(value) => value,
@@ -139,13 +144,13 @@ fn scenario_action_cb(
     match action {
         ScenarioAction::START => {
             ctx.evt.subscribe(afb_rqt)?;
-            ctx.job_id = ctx.injector.start(afb_rqt, ctx.evt)?;
+            ctx.job_id = ctx.injector.post_scenario(afb_rqt, ctx.evt)?;
             afb_rqt.reply(ctx.job_id, 0);
         }
 
         ScenarioAction::STOP => {
             ctx.evt.unsubscribe(afb_rqt)?;
-            let result = ctx.injector.stop(ctx.job_id)?;
+            let result = ctx.injector.kill_scenario(ctx.job_id)?;
             afb_rqt.reply(result, 0);
             ctx.job_id = 0;
         }
@@ -159,33 +164,160 @@ fn scenario_action_cb(
     Ok(())
 }
 
-// call by jobpost when injector run a scenario
-fn injector_jobpost_cb(
+pub type Watchdog = Arc<(Mutex<SimulationStatus>, Condvar)>;
+
+struct InjectorAsyncCtx {
+    #[allow(dead_code)]
+    uid: &'static str,
+    expects: JsoncObj,
+    sequence: usize,
+    semaphore: Watchdog,
+}
+
+struct InjectorWatchdogCtx {
+    #[allow(dead_code)]
+    uid: &'static str,
+    semaphore: Watchdog,
+}
+
+pub fn injector_async_timeout(
+    _job: &AfbSchedJob,
+    signal: i32,
+    args: &AfbCtxData,
+    _context: &AfbCtxData,
+) -> Result<(), AfbError> {
+    let ctx = args.get_ref::<InjectorWatchdogCtx>()?;
+
+
+    // if signal == 0 then we reach watchdog timeout
+    if signal == 0 {
+        let (lock, cvar) = &*ctx.semaphore;
+        match lock.lock() {
+            Ok(mut value) => {
+                *value = SimulationStatus::Timeout;
+                cvar.notify_one();
+            }
+            Err(_) => {
+                return afb_error!(
+                    "injector-watchdog-cb",
+                    "(hoops) fail to acquire status semaphore"
+                )
+            }
+        }
+    }
+
+    args.free::<InjectorWatchdogCtx>();
+    Ok(())
+}
+
+fn injector_async_response(
+    _api: &AfbApi,
+    args: &AfbRqtData,
+    context: &AfbCtxData,
+) -> Result<(), AfbError> {
+    let ctx = context.get_ref::<InjectorAsyncCtx>()?;
+
+    let status = match ctx.expects.count()? {
+        1 => {
+            // injector only use 1st expect element
+            let received = args.get::<JsoncObj>(0)?;
+            match check_arguments(ctx.sequence, &received, &ctx.expects.index(0)?) {
+                Ok(value) => value,
+                Err(error) => SimulationStatus::Fail(error),
+            }
+        }
+        0 => SimulationStatus::Done,
+        _ => {
+            return afb_error!(
+                "injector-response-cb",
+                "(hoops) injection scenario with multiple expect return element"
+            )
+        }
+    };
+
+    let (lock, cvar) = &*ctx.semaphore;
+    match lock.lock() {
+        Ok(mut value) => {
+            *value = status;
+            cvar.notify_one();
+        }
+        Err(_) => {
+            return afb_error!(
+                "injector-response-cb",
+                "(hoops) fail to acquire status semaphore"
+            )
+        }
+    }
+
+    context.free::<InjectorAsyncCtx>();
+    Ok(())
+}
+
+fn injector_async_request(
     api: AfbApiV4,
-    transac: &mut InjectorEntry,
-) -> Result<SimulationStatus, AfbError> {
+    transac: &InjectorEntry,
+    semaphore: Watchdog,
+) -> Result<(), AfbError> {
     let mut query = AfbParams::new();
     for idx in 0..transac.queries.count()? {
         let jsonc = transac.queries.index::<JsoncObj>(idx)?;
         query.push(jsonc.clone())?;
     }
 
-    afb_log_msg!(Debug, api, "api:{} verb:{}", transac.target, transac.verb);
-    let response = AfbSubCall::call_sync(api, transac.target, transac.verb, query)?;
-    let status = match transac.expects.count()? {
-        1 => {
-            // injector only use 1st expect element
-            let received = response.get::<JsoncObj>(0)?;
-            check_arguments(transac.sequence, &received, &transac.expects.index(0)?)?
-        }
-        0 => SimulationStatus::Done,
-        _ => {
-            return afb_error!(
-                "injector-req-cb",
-                "(hoops) injection scenario with multiple expect return element"
-            )
-        }
+    let subcall_ctx = InjectorAsyncCtx {
+        uid: transac.uid,
+        expects: transac.expects.clone(),
+        sequence: transac.sequence,
+        semaphore,
     };
+
+    AfbSubCall::call_async(
+        api,
+        transac.target,
+        transac.verb,
+        query,
+        injector_async_response,
+        subcall_ctx,
+    )?;
+    Ok(())
+}
+
+// call by jobpost when injector run a scenario
+pub fn injector_jobpost_transac(
+    api: AfbApiV4,
+    watchdog: &AfbSchedJob,
+    transac: &InjectorEntry,
+) -> Result<SimulationStatus, AfbError> {
+    // create a smephare with condition variable to wait either timeout either async response
+    let semaphore = Arc::new((Mutex::new(SimulationStatus::Pending), Condvar::new()));
+    //afb_log_msg!(Debug, api, "spawning {}/{}&{}", transac.target, transac.verb, transac.queries);
+
+    // start transaction watchdog timer
+    let jobid = watchdog.post(
+        transac.retry.timeout as i64,
+        InjectorWatchdogCtx {
+            uid: transac.uid,
+            semaphore: semaphore.clone(),
+        },
+    )?;
+
+    // start asynchronous subcall request
+    injector_async_request(api, transac, semaphore.clone())?;
+
+    // wait util call return or timeout burn
+    let (lock, cvar) = &*semaphore;
+    let status = match lock.lock() {
+        Ok(mut value) => {
+            while value.is_pending() {
+                value = cvar.wait(value).unwrap();
+            }
+            value.clone()
+        }
+        Err(_) => SimulationStatus::InvalidSequence,
+    };
+
+    // we have a response good or bad we kill watchdog
+    let _ = watchdog.abort(jobid); // ignore result
 
     Ok(status)
 }
@@ -290,19 +422,21 @@ fn create_transaction_verb(
             transaction_verb.set_context(context);
         }
         TransactionVerbCtx::Injector(_) => {
-            let target_api= match target {
-                None => return afb_error! ("injector-create-verb", "config target api missing"),
-                Some(value) => value
+            let target_api = match target {
+                None => return afb_error!("injector-create-verb", "config target api missing"),
+                Some(value) => value,
             };
 
             let context = InjectorEntry {
                 queries: queries.clone(),
                 expects,
                 sequence: 0,
+                delay: time::Duration::from_millis(0),
                 status: SimulationStatus::InvalidSequence,
                 target: target_api,
                 uid: verb,
                 verb: verb,
+                retry: InjectorRetryConf::default(),
             };
             transaction_verb.set_context(context);
         }
@@ -427,6 +561,7 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
                 "transactions should be a valid array of (uid,request,expect)"
             );
         }
+        let scenario_timeout = jscenario.default("timeout", transactions.count()? as u32)?;
 
         let scenario_event = AfbEvent::new(uid);
         let scenario_verb = AfbVerb::new(uid);
@@ -434,9 +569,10 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
             uid,
             config.target,
             prefix,
+            scenario_timeout,
             transactions.clone(),
+            config.delay_conf,
             config.retry_conf,
-            injector_jobpost_cb,
         )?;
         scenario_verb
             .set_name(name)
