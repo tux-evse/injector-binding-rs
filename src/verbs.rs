@@ -15,8 +15,6 @@ use afbv4::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
-const DEFAULT_ISO_TIMEOUT: i32 = 5; // call_sync 5s default timeout
-
 AfbDataConverter!(scenario_actions, ScenarioAction);
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "lowercase", tag = "action")]
@@ -422,19 +420,6 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
         let info = jscenario.default("info", "")?;
         let prefix = jscenario.default("prefix", uid)?;
 
-        let retry_conf= match jscenario.optional::<JsoncObj>("retry")? {
-            None => InjectorRetryConf{
-                delay: 100,
-                timeout: DEFAULT_ISO_TIMEOUT,
-                count: 1,
-            },
-            Some(jretry) => InjectorRetryConf{
-                delay: jretry.default("delay", 100)?,
-                timeout: jretry.default("timeout", DEFAULT_ISO_TIMEOUT)?,
-                count: jretry.default("count", 1)?,
-            }
-        };
-
         let transactions = jscenario.get::<JsoncObj>("transactions")?;
         if !transactions.is_type(Jtype::Array) {
             return afb_error!(
@@ -450,7 +435,7 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
             config.target,
             prefix,
             transactions.clone(),
-            retry_conf,
+            config.retry_conf,
             injector_jobpost_cb,
         )?;
         scenario_verb

@@ -12,6 +12,9 @@
 
 use crate::prelude::*;
 use afbv4::prelude::*;
+use std::time;
+
+const DEFAULT_CALL_TIMEOUT: i32 = 5; // call_sync 5s default timeout
 
 pub enum SimulationMode {
     Responder,
@@ -23,6 +26,7 @@ pub struct BindingConfig {
     pub scenarios: JsoncObj,
     pub target: Option<&'static str>,
     pub loop_reset: bool,
+    pub retry_conf: InjectorRetryConf,
 }
 
 // Binding init callback started at binding load time before any API exist
@@ -37,27 +41,48 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
     let simulation = match jconf.default("simulation", "injector")? {
         "" | "injector" => SimulationMode::Injector,
         "responder" => SimulationMode::Responder,
-        other => return afb_error! ("simu-binding-config", "expected mode:'injector'|'responder' got:{}", other)
+        other => {
+            return afb_error!(
+                "simu-binding-config",
+                "expected mode:'injector'|'responder' got:{}",
+                other
+            )
+        }
     };
 
-    let loop_reset= jconf.default("loop", true)?;
-    let target=  jconf.optional::<&'static str>("target")?;
+    let loop_reset = jconf.default("loop", true)?;
+    let target = jconf.optional::<&'static str>("target")?;
 
-    let scenarios =    jconf.get::<JsoncObj>("scenarios")?;
-    if ! scenarios.is_type(Jtype::Array) {
-        return afb_error! ("simu-binding-config", "scenarios should be a valid array of simulator messages")
+    let scenarios = jconf.get::<JsoncObj>("scenarios")?;
+    if !scenarios.is_type(Jtype::Array) {
+        return afb_error!(
+            "simu-binding-config",
+            "scenarios should be a valid array of simulator messages"
+        );
     }
+
+    let retry_conf = match jconf.optional::<JsoncObj>("retry")? {
+        None => InjectorRetryConf {
+            delay: time::Duration::from_millis(100),
+            timeout: DEFAULT_CALL_TIMEOUT,
+            count: 1,
+        },
+        Some(jretry) => InjectorRetryConf {
+            delay: time::Duration::from_millis(jretry.default("delay", 100)?),
+            timeout: jretry.default("timeout", DEFAULT_CALL_TIMEOUT)?,
+            count: jretry.default("count", 10)?,
+        },
+    };
 
     let config = BindingConfig {
         simulation,
         scenarios: scenarios.clone(),
         target,
         loop_reset,
+        retry_conf,
     };
     // create an register frontend api and register init session callback
-    let api = AfbApi::new(api)
-        .set_info(info);
-
+    let api = AfbApi::new(api).set_info(info);
 
     // create verbs
     register_verbs(api, &config)?;

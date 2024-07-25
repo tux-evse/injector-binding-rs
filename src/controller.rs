@@ -13,6 +13,7 @@
 use afbv4::prelude::*;
 use std::cell::Cell;
 use std::sync::{Mutex, MutexGuard};
+use std::{thread, time};
 
 pub type InjectorJobPostCb =
     fn(api: AfbApiV4, transac: &mut InjectorEntry) -> Result<SimulationStatus, AfbError>;
@@ -32,7 +33,7 @@ pub struct JobTransactionParam<'a> {
 
 #[derive(Clone, Copy)]
 pub struct InjectorRetryConf {
-    pub delay: i32,
+    pub delay: time::Duration,
     pub timeout: i32,
     pub count: i32,
 }
@@ -82,18 +83,20 @@ fn job_transaction_cb(
     if !ctx.running {
         for idx in 0..ctx.retry_conf.count {
             transac.status = SimulationStatus::Pending;
-            transac.status = match (ctx.callback)(param.api, &mut transac)
-            {
-                Ok(value)=> value,
+            transac.status = match (ctx.callback)(param.api, &mut transac) {
+                Ok(value) => value,
                 Err(error) => {
                     // api/verb did not return
-                    jreply.add("error", error.to_jsonc()?)?;
-                    ctx.event.push(jreply.clone());
-                    return afb_error!(
-                        "job_transaction_cb",
-                        "callsync fail {}",
-                        error
-                    )
+                    if idx < ctx.retry_conf.count {
+                        jreply.add("status", "SimulationStatus::Retry")?;
+                        ctx.event.push(jreply.clone());
+                        println!("**** call_syn c error:{}", error);
+                        SimulationStatus::Retry
+                    } else {
+                        jreply.add("error", error.to_jsonc()?)?;
+                        ctx.event.push(jreply.clone());
+                        return afb_error!("job_transaction_cb", "callsync fail {}", error);
+                    }
                 }
             };
             match &transac.status {
@@ -103,6 +106,10 @@ fn job_transaction_cb(
                     jreply.add("error", error.to_jsonc()?)?;
                     ctx.event.push(jreply.clone());
                     break;
+                }
+                SimulationStatus::Retry => {
+                    println!("**** retry call_sync idx:{} verb:{}", idx, transac.verb);
+                    thread::sleep(ctx.retry_conf.delay);
                 }
                 _ => {
                     return afb_error!(
@@ -202,6 +209,7 @@ pub enum SimulationStatus {
     InvalidSequence,
     Idle,
     Timeout,
+    Retry,
     Fail(AfbError),
 }
 
