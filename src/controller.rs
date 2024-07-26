@@ -87,7 +87,7 @@ fn spawn_one_transaction(
     api: AfbApiV4,
     transac: &mut InjectorEntry,
     watchdog: &AfbSchedJob,
-    event: &AfbEvent,
+    event: Option<&AfbEvent>,
 ) -> Result<(), AfbError> {
     // send result as event
     let jreply = JsoncObj::new();
@@ -103,12 +103,15 @@ fn spawn_one_transaction(
                 // api/verb did not return
                 if idx < transac.retry.count {
                     jreply.add("status", "SimulationStatus::Retry")?;
-                    event.push(jreply.clone());
-                    println!("**** call_syn c error:{}", error);
+                    if let Some(evt) = event {
+                        evt.push(jreply.clone());
+                    }
                     SimulationStatus::Retry
                 } else {
                     jreply.add("error", error.to_jsonc()?)?;
-                    event.push(jreply.clone());
+                    if let Some(evt) = event {
+                        evt.push(jreply.clone());
+                    }
                     return afb_error!("job_transaction_cb", "callsync fail {}", error);
                 }
             }
@@ -118,12 +121,12 @@ fn spawn_one_transaction(
             SimulationStatus::Fail(error) => {
                 // api/verb return invalid values
                 jreply.add("error", error.to_jsonc()?)?;
-                event.push(jreply.clone());
+                if let Some(evt) = event {
+                    evt.push(jreply.clone());
+                }
                 break;
             }
-            SimulationStatus::Retry => {
-                println!("**** retry call_sync idx:{} verb:{}", idx, transac.verb);
-            }
+            SimulationStatus::Retry => {}
             _ => {
                 return afb_error!(
                     "job_transaction_cb",
@@ -146,14 +149,16 @@ fn spawn_one_transaction(
     }
 
     jreply.add("status", format!("{:?}", &transac.status).as_str())?;
-    event.push(jreply.clone());
+    if let Some(evt) = event {
+        evt.push(jreply.clone());
+    }
     Ok(())
 }
 
 pub struct JobScenarioParam {
     pub api: AfbApiV4,
     pub injector: &'static Injector,
-    pub event: &'static AfbEvent,
+    pub event: Option<&'static AfbEvent>,
 }
 
 pub fn job_scenario_exec(param: &JobScenarioParam) -> Result<(), AfbError> {
@@ -310,6 +315,10 @@ impl Injector {
         Ok(Box::leak(Box::new(this)))
     }
 
+    pub fn get_uid(&self) -> &str {
+        self.uid
+    }
+
     #[track_caller]
     pub fn lock_state(&self) -> Result<MutexGuard<'_, ScenarioState>, AfbError> {
         let guard = self.data_set.lock().unwrap();
@@ -318,15 +327,14 @@ impl Injector {
 
     pub fn post_scenario(
         &'static self,
-        afb_rqt: &AfbRequest,
+        api: AfbApiV4,
         event: &'static AfbEvent,
     ) -> Result<i32, AfbError> {
-        let api = afb_rqt.get_apiv4();
         let job_id = self.scenario_job.post(
             100, // 100ms start delay
             JobScenarioParam {
                 injector: self,
-                event,
+                event: Some(event),
                 api,
             },
         )?;

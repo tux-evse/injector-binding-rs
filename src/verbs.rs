@@ -139,13 +139,14 @@ fn scenario_action_cb(
     args: &AfbRqtData,
     ctx: &AfbCtxData,
 ) -> Result<(), AfbError> {
+    let api= afb_rqt.get_apiv4();
     let ctx = ctx.get_mut::<ScenarioReqCtx>()?;
     let action = args.get::<&ScenarioAction>(0)?;
 
     match action {
         ScenarioAction::START => {
             ctx.evt.subscribe(afb_rqt)?;
-            ctx.job_id = ctx.injector.post_scenario(afb_rqt, ctx.evt)?;
+            ctx.job_id = ctx.injector.post_scenario(api, ctx.evt)?;
             afb_rqt.reply(ctx.job_id, 0);
         }
 
@@ -163,13 +164,12 @@ fn scenario_action_cb(
 
         ScenarioAction::EXEC => {
             ctx.evt.subscribe(afb_rqt)?;
-            ctx.job_id = ctx.injector.post_scenario(afb_rqt, ctx.evt)?;
-            let param= JobScenarioParam {
+            let param = JobScenarioParam {
                 injector: ctx.injector,
-                event: ctx.evt,
-                api: afb_rqt.get_apiv4(),
+                event: Some(ctx.evt),
+                api,
             };
-            job_scenario_exec (&param)?;
+            job_scenario_exec(&param)?;
             let result = ctx.injector.get_result()?;
             afb_rqt.reply(result, 0);
         }
@@ -200,7 +200,6 @@ pub fn injector_async_timeout(
     _context: &AfbCtxData,
 ) -> Result<(), AfbError> {
     let ctx = args.get_ref::<InjectorWatchdogCtx>()?;
-
 
     // if signal == 0 then we reach watchdog timeout
     if signal == 0 {
@@ -557,8 +556,12 @@ fn create_transaction_group(
     Ok(scenario_group.finalize()?)
 }
 
-fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), AfbError> {
+pub fn register_injector(
+    api: &mut AfbApi,
+    config: &BindingConfig,
+) -> Result<Vec<&'static Injector>, AfbError> {
     scenario_actions::register()?;
+    let mut injectors = Vec::new();
 
     for idx in 0..config.scenarios.count()? {
         let jscenario = config.scenarios.index::<JsoncObj>(idx)?;
@@ -613,8 +616,9 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
             )?;
             api.add_group(transaction_group);
         }
+        injectors.push(injector);
     }
-    Ok(())
+    Ok(injectors)
 }
 
 fn responder_reset_cb(
@@ -628,7 +632,7 @@ fn responder_reset_cb(
     Ok(())
 }
 
-fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<(), AfbError> {
+pub fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<(), AfbError> {
     let responder = Responder::new(config.loop_reset);
     let responder_verb = AfbVerb::new("reset")
         .set_info("scenario sequence counter")
@@ -666,9 +670,3 @@ fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Af
     Ok(())
 }
 
-pub fn register_verbs(api: &mut AfbApi, config: &BindingConfig) -> Result<(), AfbError> {
-    match config.simulation {
-        SimulationMode::Injector => register_injector(api, config),
-        SimulationMode::Responder => register_responder(api, config),
-    }
-}

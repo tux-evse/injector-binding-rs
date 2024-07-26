@@ -12,6 +12,7 @@
 
 use crate::prelude::*;
 use afbv4::prelude::*;
+use std::env;
 
 pub enum SimulationMode {
     Responder,
@@ -25,6 +26,32 @@ pub struct BindingConfig {
     pub loop_reset: bool,
     pub delay_conf: InjectorDelayConf,
     pub retry_conf: InjectorRetryConf,
+}
+
+struct ApiInjectorCtx {
+    injector: &'static Injector,
+}
+
+impl AfbApiControls for ApiInjectorCtx {
+    // the API is created and ready. At this level user may subcall api(s) declare as dependencies
+    fn start(&mut self, api: &AfbApi) -> Result<(), AfbError> {
+        afb_log_msg!(Warning, api, "autorun started, scenario: {}", self.injector.get_uid());
+        let param = JobScenarioParam {
+            injector: self.injector,
+            event: None,
+            api: api.get_apiv4(),
+        };
+        job_scenario_exec(&param)?;
+        let result = self.injector.get_result()?;
+        println!("{:#}", result);
+        afb_log_msg!(Warning, api, "autorun exit");
+        std::process::exit(0);
+    }
+
+    // mandatory unsed declaration
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 // Binding init callback started at binding load time before any API exist
@@ -61,12 +88,12 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
 
     let retry_conf = match jconf.optional::<JsoncObj>("retry")? {
         None => InjectorRetryConf::default(),
-        Some(jretry) => InjectorRetryConf::from_jsonc(jretry)?
+        Some(jretry) => InjectorRetryConf::from_jsonc(jretry)?,
     };
 
     let delay_conf = match jconf.optional::<JsoncObj>("delay")? {
         None => InjectorDelayConf::default(),
-        Some(jretry) => InjectorDelayConf::from_jsonc(jretry)?
+        Some(jretry) => InjectorDelayConf::from_jsonc(jretry)?,
     };
 
     let config = BindingConfig {
@@ -80,8 +107,37 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
     // create an register frontend api and register init session callback
     let api = AfbApi::new(api).set_info(info);
 
-    // create verbs
-    register_verbs(api, &config)?;
+    match config.simulation {
+        SimulationMode::Injector => {
+            let injectors = register_injector(api, &config)?;
+            let autostart = match env::var("AUTORUN") {
+                Err(_) => jconf.default("autorun", 0)?,
+                Ok(value) => match value.parse() {
+                    Ok(number) => number,
+                    Err(_) => 0,
+                }
+            };
+
+            if autostart > 0 {
+                if autostart >= injectors.len() as u32 + 1 {
+                    return afb_error!(
+                        "simu-binding-config",
+                        "autostart invalid value:{} should be 1-{}",
+                        autostart,
+                        injectors.len()
+                    );
+                }
+
+                let api_ctx = ApiInjectorCtx {
+                    injector: injectors[(autostart - 1) as usize],
+                };
+                api.set_callback(Box::new(api_ctx));
+            }
+        }
+        SimulationMode::Responder => {
+            register_responder(api, &config)?;
+        }
+    }
 
     // if acls set apply them
     if let Ok(value) = jconf.get::<&'static str>("permission") {
