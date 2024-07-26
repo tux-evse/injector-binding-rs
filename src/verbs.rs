@@ -24,6 +24,7 @@ pub enum ScenarioAction {
     #[default]
     START,
     STOP,
+    EXEC,
     RESULT,
 }
 
@@ -159,8 +160,20 @@ fn scenario_action_cb(
             let result = ctx.injector.get_result()?;
             afb_rqt.reply(result, 0);
         }
-    }
 
+        ScenarioAction::EXEC => {
+            ctx.evt.subscribe(afb_rqt)?;
+            ctx.job_id = ctx.injector.post_scenario(afb_rqt, ctx.evt)?;
+            let param= JobScenarioParam {
+                injector: ctx.injector,
+                event: ctx.evt,
+                api: afb_rqt.get_apiv4(),
+            };
+            job_scenario_exec (&param)?;
+            let result = ctx.injector.get_result()?;
+            afb_rqt.reply(result, 0);
+        }
+    }
     Ok(())
 }
 
@@ -577,7 +590,7 @@ fn register_injector(api: &mut AfbApi, config: &BindingConfig) -> Result<(), Afb
         scenario_verb
             .set_name(name)
             .set_info(info)
-            .set_actions("['start','stop','result']")?
+            .set_actions("['start','stop','exec','result']")?
             .set_callback(scenario_action_cb)
             .set_context(ScenarioReqCtx {
                 _uid: uid,

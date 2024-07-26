@@ -150,32 +150,13 @@ fn spawn_one_transaction(
     Ok(())
 }
 
-pub struct JobScenarioContext {
-    //retry_conf: InjectorRetryConf,
-    count: usize,
-}
-
 pub struct JobScenarioParam {
-    api: AfbApiV4,
-    injector: &'static Injector,
-    event: &'static AfbEvent,
+    pub api: AfbApiV4,
+    pub injector: &'static Injector,
+    pub event: &'static AfbEvent,
 }
 
-fn job_scenario_cb(
-    _job: &AfbSchedJob,
-    signal: i32,
-    params: &AfbCtxData,
-    context: &AfbCtxData,
-) -> Result<(), AfbError> {
-    let param = params.get_ref::<JobScenarioParam>()?;
-    let ctx = context.get_ref::<JobScenarioContext>()?;
-
-    // job was kill from API
-    if signal != 0 {
-        context.free::<JobScenarioContext>();
-        return Ok(());
-    }
-
+pub fn job_scenario_exec(param: &JobScenarioParam) -> Result<(), AfbError> {
     // per transaction job
     let timeout_job = AfbSchedJob::new("iso15118-transac")
         .set_group(1)
@@ -183,15 +164,29 @@ fn job_scenario_cb(
         .finalize();
 
     // loop on scenario transactions
-    for idx in 0..ctx.count {
+    for idx in 0..param.injector.count {
         let mut state = param.injector.lock_state()?;
         let transac = &mut state.entries[idx];
 
         spawn_one_transaction(param.api, transac, timeout_job, param.event)?;
     }
+    Ok(())
+}
 
-    // force job termination when done
-    timeout_job.terminate();
+fn job_scenario_cb(
+    _job: &AfbSchedJob,
+    signal: i32,
+    params: &AfbCtxData,
+    _context: &AfbCtxData,
+) -> Result<(), AfbError> {
+    let param = params.get_ref::<JobScenarioParam>()?;
+
+    // job was kill from API
+    if signal != 0 {
+        return Ok(());
+    }
+
+    job_scenario_exec(param)?;
     Ok(())
 }
 
@@ -303,11 +298,7 @@ impl Injector {
 
         let scenario_job = AfbSchedJob::new("iso-15118-Injector")
             .set_callback(job_scenario_cb)
-            .set_exec_watchdog(scenario_timeout as i32)
-            .set_context(JobScenarioContext {
-                // retry_conf,
-                count: data_set.entries.len(),
-            });
+            .set_exec_watchdog(scenario_timeout as i32);
 
         let this = Self {
             uid,
@@ -359,7 +350,10 @@ impl Injector {
                     format!("ok {:04} - {}({})  # Done", idx, transac.verb, transac.uid)
                 }
                 SimulationStatus::Check => {
-                    format!("ok {:04} - {}({})  # Checked", idx, transac.verb, transac.uid)
+                    format!(
+                        "ok {:04} - {}({})  # Checked",
+                        idx, transac.verb, transac.uid
+                    )
                 }
                 SimulationStatus::Fail(error) => {
                     format!(
