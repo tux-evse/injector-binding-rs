@@ -35,7 +35,12 @@ struct ApiInjectorCtx {
 impl AfbApiControls for ApiInjectorCtx {
     // the API is created and ready. At this level user may subcall api(s) declare as dependencies
     fn start(&mut self, api: &AfbApi) -> Result<(), AfbError> {
-        afb_log_msg!(Warning, api, "autorun started, scenario: {}", self.injector.get_uid());
+        afb_log_msg!(
+            Warning,
+            api,
+            "autorun started, scenario: {}",
+            self.injector.get_uid()
+        );
         let param = JobScenarioParam {
             injector: self.injector,
             event: None,
@@ -63,8 +68,13 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
     let api = jconf.default("api", uid)?;
     let info = jconf.default("info", "")?;
 
-    let simulation = match jconf.default("simulation", "injector")? {
-        "" | "injector" => SimulationMode::Injector,
+    let smode = match env::var("SIMULATION_MODE") {
+        Err(_) => jconf.default::<String>("simulation","injector".to_string())?,
+        Ok(value) => value,
+    };
+
+    let simulation = match smode.to_lowercase().as_str() {
+        "injector" => SimulationMode::Injector,
         "responder" => SimulationMode::Responder,
         other => {
             return afb_error!(
@@ -115,7 +125,7 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
                 Ok(value) => match value.parse() {
                     Ok(number) => number,
                     Err(_) => 0,
-                }
+                },
             };
 
             if autostart > 0 {
