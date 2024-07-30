@@ -49,7 +49,7 @@ impl AfbApiControls for ApiInjectorCtx {
         job_scenario_exec(&param)?;
         let result = self.injector.get_result()?;
         println!("{:#}", result);
-        afb_log_msg!(Warning, api, "autorun exit");
+        afb_log_msg!(Notice, api, "scenario={} exit", self.injector.get_uid());
         std::process::exit(0);
     }
 
@@ -120,7 +120,7 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
     match config.simulation {
         SimulationMode::Injector => {
             let injectors = register_injector(api, &config)?;
-            let autostart = match env::var("AUTORUN") {
+            let autostart = match env::var("SCENARIO_AUTORUN") {
                 Err(_) => jconf.default("autorun", 0)?,
                 Ok(value) => match value.parse() {
                     Ok(number) => number,
@@ -138,6 +138,7 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
                     );
                 }
 
+                afb_log_msg!(Notice, None, "SCENARIO_AUTORUN={} selected", autostart);
                 let api_ctx = ApiInjectorCtx {
                     injector: injectors[(autostart - 1) as usize],
                 };

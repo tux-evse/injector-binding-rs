@@ -93,7 +93,7 @@
                 "IFACE_SIMU": "evcc-veth",
                 "PKI_TLS_DIR": "../iso15118-simulator-rs/afb-test/certs",
                 "SIMULATION_MODE": "injector",
-                "AUTORUN": "1",
+                "SCENARIO_AUTORUN": "1",
             },
             "args": [
                 "-v",
