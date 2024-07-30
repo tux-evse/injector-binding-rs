@@ -112,7 +112,7 @@ fn spawn_one_transaction(
                     if let Some(evt) = event {
                         evt.push(jreply.clone());
                     }
-                    return afb_error!("job_transaction_cb", "callsync fail {}", error);
+                    return afb_error!(transac.uid, "callsync fail {}", error);
                 }
             }
         };
@@ -381,6 +381,7 @@ impl Injector {
 }
 
 pub struct ResponderEntry {
+    pub uid: &'static str,
     pub queries: JsoncObj,
     pub expects: JsoncObj,
     pub sequence: usize,

@@ -66,67 +66,6 @@ extern "C" fn scenario_sort_cb(
     }
 }
 
-fn cmp_entry<'a>(value: &'a Jentry, expect: &Jentry) -> Option<&'a Jentry> {
-    if value.key == expect.key {
-        Some(value)
-    } else {
-        None
-    }
-}
-
-fn check_arguments(
-    sequence: usize,
-    jreceived: &JsoncObj,
-    jexpected: &JsoncObj,
-) -> Result<SimulationStatus, AfbError> {
-    // move from jsonc to a rust vector of json object
-    let received = jreceived.expand()?;
-    let expected = jexpected.expand()?;
-
-    if expected.len() == 0 {
-        return Ok(SimulationStatus::InvalidSequence);
-    }
-
-    for idx in 0..expected.len() {
-        let expected_entry = &expected[idx];
-        let received_entry = match received.iter().find_map(|s| cmp_entry(s, expected_entry)) {
-            None => {
-                return afb_error!(
-                    "simu-check-arguments",
-                    format!(
-                        "seq:{} fail to find key:{} query:{}",
-                        sequence, expected_entry.key, jreceived
-                    )
-                )
-            }
-            Some(value) => value,
-        };
-
-        // if entry value embed a nested object let's recursively check content
-        if received_entry.obj.is_type(Jtype::Object) {
-            let response = check_arguments(sequence, &received_entry.obj, &expected_entry.obj);
-            match check_arguments(sequence, &received_entry.obj, &expected_entry.obj)? {
-                SimulationStatus::Check => {}
-                SimulationStatus::InvalidSequence => {}
-                _ => return response,
-            }
-        }
-
-        // check both received & expected value match
-        if let Err(_error) = received_entry.obj.clone().equal(expected_entry.obj.clone()) {
-            return afb_error!(
-                "simu-check-arguments",
-                "seq:{} fail key:'{}' value:{}!={}",
-                sequence,
-                expected_entry.key,
-                expected_entry.obj,
-                received_entry.obj
-            );
-        }
-    }
-    Ok(SimulationStatus::Check)
-}
-
 pub struct ScenarioReqCtx {
     _uid: &'static str,
     evt: &'static AfbEvent,
@@ -139,7 +78,7 @@ fn scenario_action_cb(
     args: &AfbRqtData,
     ctx: &AfbCtxData,
 ) -> Result<(), AfbError> {
-    let api= afb_rqt.get_apiv4();
+    let api = afb_rqt.get_apiv4();
     let ctx = ctx.get_mut::<ScenarioReqCtx>()?;
     let action = args.get::<&ScenarioAction>(0)?;
 
@@ -183,7 +122,6 @@ struct InjectorAsyncCtx {
     #[allow(dead_code)]
     uid: &'static str,
     expects: JsoncObj,
-    sequence: usize,
     semaphore: Watchdog,
 }
 
@@ -232,9 +170,10 @@ fn injector_async_response(
     let status = match ctx.expects.count()? {
         1 => {
             // injector only use 1st expect element
-            let received = args.get::<JsoncObj>(0)?;
-            match check_arguments(ctx.sequence, &received, &ctx.expects.index(0)?) {
-                Ok(value) => value,
+            let jreceived = args.get::<JsoncObj>(0)?;
+            let jexpected = ctx.expects.index(0)?;
+            match jreceived.equal(ctx.uid, jexpected, Jequal::Partial) {
+                Ok(_) => SimulationStatus::Check,
                 Err(error) => SimulationStatus::Fail(error),
             }
         }
@@ -279,7 +218,6 @@ fn injector_async_request(
     let subcall_ctx = InjectorAsyncCtx {
         uid: transac.uid,
         expects: transac.expects.clone(),
-        sequence: transac.sequence,
         semaphore,
     };
 
@@ -378,9 +316,11 @@ fn responder_req_cb(
     let received_query = args.get::<JsoncObj>(0)?;
     let expected_query = transac.queries.index(transac.sequence)?;
 
-    let status = check_arguments(transac.sequence, &received_query, &expected_query)?;
-    match status {
-        SimulationStatus::Done | SimulationStatus::Check => {
+    match received_query.equal(
+        transac.uid,
+        expected_query, Jequal::Partial
+    ) {
+        Ok(_) => {
             let expect = transac.expects.index::<JsoncObj>(transac.sequence)?;
             if expect.len()? == 0 {
                 afb_rqt.reply(AFB_NO_DATA, 0);
@@ -425,6 +365,7 @@ fn create_transaction_verb(
     match context {
         TransactionVerbCtx::Responder(responder) => {
             let context = ResponderEntry {
+                uid: verb,
                 queries: queries.clone(),
                 expects,
                 sequence: 0,
@@ -669,4 +610,3 @@ pub fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<()
     }
     Ok(())
 }
-
