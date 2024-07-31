@@ -2,61 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "simple-injector",
-            "type": "lldb",
-            "preLaunchTask": "binding-native-build",
-            "request": "launch",
-            "program": "afb-binder",
-            "env": {
-                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
-                "LD_LIBRARY_PATH": "/usr/local/lib64",
-                "IFACE_SIMU": "lo",
-                "SIMULATION_PORT": "1234",
-                "SIMULATION_MODE": "injector",
-            },
-            "args": [
-                "-v",
-                "--monitoring",
-                "--port=1234",
-                "--trap-faults=0",
-                "--config=etc/binder-injector.yaml",
-                "--config=etc/binding-injector.yaml",
-            ],
-            "cwd": "${workspaceFolder}",
-            "initCommands": [
-                "target stop-hook add -n _start -o continue",
-                "settings set target.disable-aslr false"
-            ]
-        },
-        {
-            "name": "simple-responder",
-            "type": "lldb",
-            "preLaunchTask": "binding-native-build",
-            "request": "launch",
-            "program": "afb-binder",
-            "env": {
-                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
-                "LD_LIBRARY_PATH": "/usr/local/lib64",
-                "IFACE_SIMU": "lo",
-                "SIMULATION_PORT": "1235",
-                "SIMULATION_MODE": "responder",
-            },
-            "args": [
-                "-v",
-                "--monitoring",
-                "--trap-faults=0",
-                "--port=1235",
-                "--config=etc/binder-injector.yaml",
-                "--config=etc/binding-injector.yaml",
-            ],
-            "cwd": "${workspaceFolder}",
-            "initCommands": [
-                "target stop-hook add -n _start -o continue",
-                "settings set target.disable-aslr false"
-            ]
-        },
-        {
-            "name": "evcc-compact-15118",
+            "name": "evcc-iso2-audi",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
@@ -73,7 +19,7 @@
                 "--monitoring",
                 "--trap-faults=0",
                 "--config=../iso15118-simulator-rs/afb-evcc/etc/binding-simu15118-evcc.yaml",
-                "--config=../iso15118-simulator-rs/afb-test/etc/compact-dc-iso2.json",
+                "--config=../iso15118-simulator-rs/afb-test/etc/audi-dc-iso2.json",
             ],
             "cwd": "${workspaceFolder}",
             "initCommands": [
@@ -82,7 +28,7 @@
             ]
         },
         {
-            "name": "evcc-autorun-15118",
+            "name": "evcc-autorun-audi",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
             "request": "launch",
@@ -100,7 +46,35 @@
                 "--monitoring",
                 "--trap-faults=0",
                 "--config=../iso15118-simulator-rs/afb-evcc/etc/binding-simu15118-evcc.yaml",
-                "--config=../iso15118-simulator-rs/afb-test/etc/compact-dc-iso2.json",
+                "--config=../iso15118-simulator-rs/afb-test/etc/audi-dc-iso2.json",
+            ],
+            "cwd": "${workspaceFolder}",
+            "initCommands": [
+                "target stop-hook add -n _start -o continue",
+                "settings set target.disable-aslr false"
+            ]
+        },
+
+                {
+            "name": "evcc-autorun-tesla",
+            "type": "lldb",
+            "preLaunchTask": "binding-native-build",
+            "request": "launch",
+            "program": "afb-binder",
+            "env": {
+                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
+                "LD_LIBRARY_PATH": "/usr/local/lib64",
+                "IFACE_SIMU": "evcc-veth",
+                "PKI_TLS_DIR": "../iso15118-simulator-rs/afb-test/certs",
+                "SIMULATION_MODE": "injector",
+                "SCENARIO_AUTORUN": "1",
+            },
+            "args": [
+                "-v",
+                "--monitoring",
+                "--trap-faults=0",
+                "--config=../iso15118-simulator-rs/afb-evcc/etc/binding-simu15118-evcc.yaml",
+                "--config=../iso15118-simulator-rs/afb-test/etc/tesla-3-din.json",
             ],
             "cwd": "${workspaceFolder}",
             "initCommands": [

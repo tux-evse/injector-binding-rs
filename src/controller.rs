@@ -16,18 +16,18 @@ use std::cell::Cell;
 use std::sync::{Mutex, MutexGuard};
 use std::{thread, time};
 
-const DEFAULT_MIN_TIMEOUT: u32 = 10; // scenario minimal timeout in seconds
-const DEFAULT_CALL_TIMEOUT: u32 = 1000; // call_sync 1s default timeout
-const DEFAULT_CALL_DELAY: u32 = 100; // call_sync 100ms delay
-const DEFAULT_DELAY_PERCENT: u32 = 10; // reduce delay by 10
-const DEFAULT_DELAY_MIN: u32 = 50; // reduce delay by 10
-const DEFAULT_DELAY_MAX: u32 = 100; // reduce delay by 10
+const DEFAULT_MIN_TIMEOUT: u64 = 10; // scenario minimal timeout in seconds
+const DEFAULT_CALL_TIMEOUT: u64 = 1000; // call_sync 1s default timeout
+const DEFAULT_CALL_DELAY: u64 = 100; // call_sync 100ms delay
+const DEFAULT_DELAY_PERCENT: u64 = 10; // reduce delay by 10
+const DEFAULT_DELAY_MIN: u64 = 50; // reduce delay by 10
+const DEFAULT_DELAY_MAX: u64 = 100; // reduce delay by 10
 
 #[derive(Clone, Copy)]
 pub struct InjectorDelayConf {
-    pub percent: u32,
-    pub min: u32,
-    pub max: u32,
+    pub percent: u64,
+    pub min: u64,
+    pub max: u64,
 }
 
 impl InjectorDelayConf {
@@ -46,7 +46,7 @@ impl InjectorDelayConf {
         })
     }
 
-    pub fn get_duration(&self, millis: u32) -> time::Duration {
+    pub fn get_duration(&self, millis: u64) -> time::Duration {
         let delay = millis * self.percent / 100;
         let delay = if delay > self.max {
             self.max
@@ -55,29 +55,29 @@ impl InjectorDelayConf {
         } else {
             delay
         };
-        time::Duration::from_millis(delay as u64)
+        time::Duration::from_millis(delay)
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct InjectorRetryConf {
     pub delay: time::Duration,
-    pub timeout: u32,
+    pub timeout: time::Duration,
     pub count: u32,
 }
 
 impl InjectorRetryConf {
     pub fn default() -> Self {
         Self {
-            delay: time::Duration::from_millis(100),
-            timeout: DEFAULT_CALL_TIMEOUT,
+            delay: time::Duration::from_millis(DEFAULT_CALL_DELAY),
+            timeout: time::Duration::from_millis(DEFAULT_CALL_TIMEOUT),
             count: 1,
         }
     }
     pub fn from_jsonc(jsonc: JsoncObj) -> Result<Self, AfbError> {
         Ok(Self {
-            delay: time::Duration::from_millis(jsonc.default("delay", 100)?),
-            timeout: jsonc.default("timeout", DEFAULT_CALL_TIMEOUT)?,
+            delay: time::Duration::from_millis(jsonc.default("delay", DEFAULT_CALL_TIMEOUT)?),
+            timeout: time::Duration::from_millis(jsonc.default("timeout", DEFAULT_CALL_TIMEOUT)?),
             count: jsonc.default("count", 1)?,
         })
     }
@@ -86,7 +86,6 @@ impl InjectorRetryConf {
 fn spawn_one_transaction(
     api: AfbApiV4,
     transac: &mut InjectorEntry,
-    watchdog: &AfbSchedJob,
     event: Option<&AfbEvent>,
 ) -> Result<(), AfbError> {
     // send result as event
@@ -97,7 +96,7 @@ fn spawn_one_transaction(
     for idx in 0..transac.retry.count {
         transac.status = SimulationStatus::Pending;
         thread::sleep(transac.retry.delay); // force delay between transaction
-        transac.status = match injector_jobpost_transac(api, watchdog, transac) {
+        transac.status = match injector_jobpost_transac(api, transac) {
             Ok(value) => value,
             Err(error) => {
                 // api/verb did not return
@@ -162,18 +161,13 @@ pub struct JobScenarioParam {
 }
 
 pub fn job_scenario_exec(param: &JobScenarioParam) -> Result<(), AfbError> {
-    // per transaction job
-    let timeout_job = AfbSchedJob::new("iso15118-transac")
-        .set_group(1)
-        .set_callback(injector_async_timeout)
-        .finalize();
 
     // loop on scenario transactions
     for idx in 0..param.injector.count {
         let mut state = param.injector.lock_state()?;
         let transac = &mut state.entries[idx];
 
-        spawn_one_transaction(param.api, transac, timeout_job, param.event)?;
+        spawn_one_transaction(param.api, transac, param.event)?;
     }
     Ok(())
 }
@@ -207,15 +201,6 @@ pub enum SimulationStatus {
     Fail(AfbError),
 }
 
-impl SimulationStatus {
-    pub fn is_pending(&self) -> bool {
-        match self {
-            SimulationStatus::Pending => true,
-            _ => false,
-        }
-    }
-}
-
 pub struct InjectorEntry {
     pub uid: &'static str,
     pub target: &'static str,
@@ -244,7 +229,7 @@ impl Injector {
         uid: &'static str,
         target: Option<&'static str>,
         prefix: &'static str,
-        scenario_timeout: u32,
+        scenario_timeout: u64,
         transactions: JsoncObj,
         delay_conf: InjectorDelayConf,
         retry_conf: InjectorRetryConf,

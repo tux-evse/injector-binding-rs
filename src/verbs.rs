@@ -125,41 +125,6 @@ struct InjectorAsyncCtx {
     semaphore: Watchdog,
 }
 
-struct InjectorWatchdogCtx {
-    #[allow(dead_code)]
-    uid: &'static str,
-    semaphore: Watchdog,
-}
-
-pub fn injector_async_timeout(
-    _job: &AfbSchedJob,
-    signal: i32,
-    args: &AfbCtxData,
-    _context: &AfbCtxData,
-) -> Result<(), AfbError> {
-    let ctx = args.get_ref::<InjectorWatchdogCtx>()?;
-
-    // if signal == 0 then we reach watchdog timeout
-    if signal == 0 {
-        let (lock, cvar) = &*ctx.semaphore;
-        match lock.lock() {
-            Ok(mut value) => {
-                *value = SimulationStatus::Timeout;
-                cvar.notify_one();
-            }
-            Err(_) => {
-                return afb_error!(
-                    "injector-watchdog-cb",
-                    "(hoops) fail to acquire status semaphore"
-                )
-            }
-        }
-    }
-
-    args.free::<InjectorWatchdogCtx>();
-    Ok(())
-}
-
 fn injector_async_response(
     _api: &AfbApi,
     args: &AfbRqtData,
@@ -199,7 +164,6 @@ fn injector_async_response(
             )
         }
     }
-
     context.free::<InjectorAsyncCtx>();
     Ok(())
 }
@@ -235,21 +199,11 @@ fn injector_async_request(
 // call by jobpost when injector run a scenario
 pub fn injector_jobpost_transac(
     api: AfbApiV4,
-    watchdog: &AfbSchedJob,
     transac: &InjectorEntry,
 ) -> Result<SimulationStatus, AfbError> {
     // create a smephare with condition variable to wait either timeout either async response
     let semaphore = Arc::new((Mutex::new(SimulationStatus::Pending), Condvar::new()));
     //afb_log_msg!(Debug, api, "spawning {}/{}&{}", transac.target, transac.verb, transac.queries);
-
-    // start transaction watchdog timer
-    let jobid = watchdog.post(
-        transac.retry.timeout as i64,
-        InjectorWatchdogCtx {
-            uid: transac.uid,
-            semaphore: semaphore.clone(),
-        },
-    )?;
 
     // start asynchronous subcall request
     injector_async_request(api, transac, semaphore.clone())?;
@@ -257,17 +211,17 @@ pub fn injector_jobpost_transac(
     // wait util call return or timeout burn
     let (lock, cvar) = &*semaphore;
     let status = match lock.lock() {
-        Ok(mut value) => {
-            while value.is_pending() {
-                value = cvar.wait(value).unwrap();
+        Ok(value) => {
+            //value = cvar.wait(value).unwrap();
+            let result = cvar.wait_timeout(value, transac.retry.timeout).unwrap();
+            if result.1.timed_out() {
+                SimulationStatus::Timeout
+            } else {
+                result.0.clone()
             }
-            value.clone()
         }
         Err(_) => SimulationStatus::InvalidSequence,
     };
-
-    // we have a response good or bad we kill watchdog
-    let _ = watchdog.abort(jobid); // ignore result
 
     Ok(status)
 }
@@ -316,10 +270,7 @@ fn responder_req_cb(
     let received_query = args.get::<JsoncObj>(0)?;
     let expected_query = transac.queries.index(transac.sequence)?;
 
-    match received_query.equal(
-        transac.uid,
-        expected_query, Jequal::Partial
-    ) {
+    match received_query.equal(transac.uid, expected_query, Jequal::Partial) {
         Ok(_) => {
             let expect = transac.expects.index::<JsoncObj>(transac.sequence)?;
             if expect.len()? == 0 {
@@ -518,7 +469,7 @@ pub fn register_injector(
                 "transactions should be a valid array of (uid,request,expect)"
             );
         }
-        let scenario_timeout = jscenario.default("timeout", transactions.count()? as u32)?;
+        let scenario_timeout = jscenario.default("timeout", transactions.count()? as u64)?;
 
         let scenario_event = AfbEvent::new(uid);
         let scenario_verb = AfbVerb::new(uid);
