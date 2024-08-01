@@ -96,14 +96,15 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
         );
     }
 
-    let retry_conf = match jconf.optional::<JsoncObj>("retry")? {
-        None => InjectorRetryConf::default(),
-        Some(jretry) => InjectorRetryConf::from_jsonc(jretry)?,
-    };
 
     let delay_conf = match jconf.optional::<JsoncObj>("delay")? {
         None => InjectorDelayConf::default(),
         Some(jretry) => InjectorDelayConf::from_jsonc(jretry)?,
+    };
+
+    let retry_conf = match jconf.optional::<JsoncObj>("retry")? {
+        None => InjectorRetryConf::default(),
+        Some(jretry) => InjectorRetryConf::from_jsonc(jretry, &delay_conf)?,
     };
 
     let config = BindingConfig {

@@ -54,8 +54,7 @@
                 "settings set target.disable-aslr false"
             ]
         },
-
-                {
+        {
             "name": "evcc-autorun-tesla",
             "type": "lldb",
             "preLaunchTask": "binding-native-build",
@@ -75,6 +74,34 @@
                 "--trap-faults=0",
                 "--config=../iso15118-simulator-rs/afb-evcc/etc/binding-simu15118-evcc.yaml",
                 "--config=../iso15118-simulator-rs/afb-test/etc/tesla-3-din.json",
+            ],
+            "cwd": "${workspaceFolder}",
+            "initCommands": [
+                "target stop-hook add -n _start -o continue",
+                "settings set target.disable-aslr false"
+            ]
+        },
+        {
+            "name": "evcc-din-bmw-autostart",
+            "type": "lldb",
+            "preLaunchTask": "binding-native-build",
+            "request": "launch",
+            "program": "afb-binder",
+            "env": {
+                "CARGO_BINDING_DIR": "${env:CARGO_TARGET_DIR}debug",
+                "LD_LIBRARY_PATH": "/usr/local/lib64",
+                "IFACE_SIMU": "evcc-veth",
+                "PKI_TLS_DIR": "../iso15118-simulator-rs/afb-test/certs",
+                "SIMULATION_MODE": "injector",
+                "SCENARIO_AUTORUN": "1",
+            },
+            "args": [
+                "-v",
+                "--jobs-max=64000",
+                "--monitoring",
+                "--trap-faults=0",
+                "--config=../iso15118-simulator-rs/afb-evcc/etc/binding-simu15118-evcc.yaml",
+                "--config=../iso15118-simulator-rs/afb-test/etc/BMW-i4-din.json",
             ],
             "cwd": "${workspaceFolder}",
             "initCommands": [

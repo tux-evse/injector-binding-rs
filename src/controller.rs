@@ -74,9 +74,9 @@ impl InjectorRetryConf {
             count: 1,
         }
     }
-    pub fn from_jsonc(jsonc: JsoncObj) -> Result<Self, AfbError> {
+    pub fn from_jsonc(jsonc: JsoncObj, delay_conf: &InjectorDelayConf) -> Result<Self, AfbError> {
         Ok(Self {
-            delay: time::Duration::from_millis(jsonc.default("delay", DEFAULT_CALL_TIMEOUT)?),
+            delay: delay_conf.get_duration(jsonc.default("delay", DEFAULT_CALL_TIMEOUT)?),
             timeout: time::Duration::from_millis(jsonc.default("timeout", DEFAULT_CALL_TIMEOUT)?),
             count: jsonc.default("count", 1)?,
         })
@@ -93,25 +93,44 @@ fn spawn_one_transaction(
     jreply.add("uid", transac.uid)?;
     jreply.add("verb", transac.verb)?;
 
+    // initial request delay
+    thread::sleep(transac.delay);
+
     for idx in 0..transac.retry.count {
         transac.status = SimulationStatus::Pending;
-        thread::sleep(transac.retry.delay); // force delay between transaction
-        transac.status = match injector_jobpost_transac(api, transac) {
+        transac.status = match injector_launch_transac(api, transac) {
             Ok(value) => value,
             Err(error) => {
                 // api/verb did not return
                 if idx < transac.retry.count {
                     jreply.add("status", "SimulationStatus::Retry")?;
-                    if let Some(evt) = event {
-                        evt.push(jreply.clone());
+                    match event {
+                        Some(evt) => {
+                            evt.push(jreply.clone());
+                        }
+                        None => {
+                            println!(
+                                "--[{}:{}] SimulationStatus::Retry {}",
+                                transac.uid, idx, jreply
+                            );
+                        }
                     }
+                    thread::sleep(transac.retry.delay);
                     SimulationStatus::Retry
                 } else {
                     jreply.add("error", error.to_jsonc()?)?;
-                    if let Some(evt) = event {
-                        evt.push(jreply.clone());
+                    match event {
+                        Some(evt) => {
+                            evt.push(jreply.clone());
+                        }
+                        None => {
+                            println!(
+                                "--[{}:{}] SimulationStatus::Retry {}",
+                                transac.uid, idx, jreply
+                            );
+                        }
                     }
-                    return afb_error!(transac.uid, "callsync fail {}", error);
+                    return afb_error!(transac.uid, "call_async fail {}", error);
                 }
             }
         };
@@ -120,8 +139,13 @@ fn spawn_one_transaction(
             SimulationStatus::Fail(error) => {
                 // api/verb return invalid values
                 jreply.add("error", error.to_jsonc()?)?;
-                if let Some(evt) = event {
-                    evt.push(jreply.clone());
+                match event {
+                    Some(evt) => {
+                        evt.push(jreply.clone());
+                    }
+                    None => {
+                        println!("--[{}] SimulationStatus::Fail {}", transac.uid, jreply);
+                    }
                 }
                 break;
             }
@@ -147,9 +171,15 @@ fn spawn_one_transaction(
         );
     }
 
-    jreply.add("status", format!("{:?}", &transac.status).as_str())?;
-    if let Some(evt) = event {
-        evt.push(jreply.clone());
+    let status = format!("{:?}", &transac.status);
+    jreply.add("status", &status)?;
+    match event {
+        Some(evt) => {
+            evt.push(jreply.clone());
+        }
+        None => {
+            println!("--[{}] {} {}", transac.uid, &status, jreply);
+        }
     }
     Ok(())
 }
@@ -161,12 +191,10 @@ pub struct JobScenarioParam {
 }
 
 pub fn job_scenario_exec(param: &JobScenarioParam) -> Result<(), AfbError> {
-
     // loop on scenario transactions
     for idx in 0..param.injector.count {
         let mut state = param.injector.lock_state()?;
         let transac = &mut state.entries[idx];
-
         spawn_one_transaction(param.api, transac, param.event)?;
     }
     Ok(())
@@ -184,7 +212,6 @@ fn job_scenario_cb(
     if signal != 0 {
         return Ok(());
     }
-
     job_scenario_exec(param)?;
     Ok(())
 }
@@ -208,8 +235,8 @@ pub struct InjectorEntry {
     pub queries: JsoncObj,
     pub expects: JsoncObj,
     pub status: SimulationStatus,
-    pub delay: time::Duration,
     pub retry: InjectorRetryConf,
+    pub delay: time::Duration,
     pub sequence: usize,
 }
 
@@ -253,10 +280,12 @@ impl Injector {
             let transac = transactions.index::<JsoncObj>(idx)?;
             let uid = transac.get::<&str>("uid")?;
             let queries = JsoncObj::array();
-            let delay = delay_conf.get_duration(transac.default("delay", DEFAULT_CALL_DELAY)?);
+
+            let delay= transac.default("delay", DEFAULT_CALL_DELAY)?;
+
             let retry_conf = match transac.optional::<JsoncObj>("retry")? {
                 None => retry_conf,
-                Some(jretry) => InjectorRetryConf::from_jsonc(jretry)?,
+                Some(jretry) => InjectorRetryConf::from_jsonc(jretry, &delay_conf)?,
             };
             if let Some(value) = transac.optional::<JsoncObj>("query")? {
                 queries.append(value)?;
@@ -279,8 +308,8 @@ impl Injector {
                 queries,
                 expects,
                 status: SimulationStatus::Skip,
-                delay,
                 retry: retry_conf,
+                delay: delay_conf.get_duration(delay),
                 sequence: 0,
                 target,
             });

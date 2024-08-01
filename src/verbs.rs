@@ -14,8 +14,8 @@ use crate::prelude::*;
 use afbv4::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::{env,time};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time;
 
 AfbDataConverter!(scenario_actions, ScenarioAction);
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -135,11 +135,21 @@ fn injector_async_response(
     let status = match ctx.expects.count()? {
         1 => {
             // injector only use 1st expect element
+            if args.get_count() < 1 {
+                return afb_error!(
+                    "injector-response-cb",
+                    "(hoops) response expected, did not yet any"
+                );
+            }
             let jreceived = args.get::<JsoncObj>(0)?;
-            let jexpected = ctx.expects.index(0)?;
-            match jreceived.equal(ctx.uid, jexpected, Jequal::Partial) {
+            let jexpected = ctx.expects.index::<JsoncObj>(0)?;
+            match jreceived.equal(ctx.uid, jexpected.clone(), Jequal::Partial) {
                 Ok(_) => SimulationStatus::Check,
-                Err(error) => SimulationStatus::Fail(error),
+                Err(error) => {
+                    afb_log_msg!(Error, _api, "received: {}", jreceived);
+                    afb_log_msg!(Error, _api, "expected: {}", jexpected);
+                    SimulationStatus::Fail(error)
+                },
             }
         }
         0 => SimulationStatus::Done,
@@ -197,7 +207,7 @@ fn injector_async_request(
 }
 
 // call by jobpost when injector run a scenario
-pub fn injector_jobpost_transac(
+pub fn injector_launch_transac(
     api: AfbApiV4,
     transac: &InjectorEntry,
 ) -> Result<SimulationStatus, AfbError> {
@@ -268,9 +278,9 @@ fn responder_req_cb(
     };
 
     let received_query = args.get::<JsoncObj>(0)?;
-    let expected_query = transac.queries.index(transac.sequence)?;
+    let expected_query = transac.queries.index::<JsoncObj>(transac.sequence)?;
 
-    match received_query.equal(transac.uid, expected_query, Jequal::Partial) {
+    match received_query.equal(transac.uid, expected_query.clone(), Jequal::Partial) {
         Ok(_) => {
             let expect = transac.expects.index::<JsoncObj>(transac.sequence)?;
             if expect.len()? == 0 {
@@ -281,11 +291,15 @@ fn responder_req_cb(
         }
 
         error => {
+            println!(
+                "*** \n -- rec:{} \n-- exp:{}",
+                received_query, expected_query
+            );
             return afb_error!(
                 "responder-req-fail",
-                "argument check return invalid value:{:?}",
+                "query check return invalid value:{:?}",
                 error
-            )
+            );
         }
     }
     // next run should match with next sequence transaction
@@ -335,11 +349,11 @@ fn create_transaction_verb(
                 queries: queries.clone(),
                 expects,
                 sequence: 0,
-                delay: time::Duration::from_millis(0),
                 status: SimulationStatus::InvalidSequence,
                 target: target_api,
                 uid: verb,
                 verb: verb,
+                delay: time::Duration::new(0,0),
                 retry: InjectorRetryConf::default(),
             };
             transaction_verb.set_context(context);
@@ -455,12 +469,22 @@ pub fn register_injector(
     scenario_actions::register()?;
     let mut injectors = Vec::new();
 
+    match config.target {
+        None => return afb_error!("register_injector", "target api SHOULD be defined"),
+        Some(value) => {api.require_api(value);},
+    }
+
     for idx in 0..config.scenarios.count()? {
         let jscenario = config.scenarios.index::<JsoncObj>(idx)?;
-        let uid = jscenario.get("uid")?;
-        let name = jscenario.default("name", uid)?;
+
+        let uid = match env::var("SCENARIO_UID") {
+            Err(_) => format!("{}:{}", jscenario.get::<String>("uid")?, idx),
+            Ok(value) => value,
+        };
+        let uid_scenario = to_static_str(uid);
+        let name = jscenario.default("name", uid_scenario)?;
         let info = jscenario.default("info", "")?;
-        let prefix = jscenario.default("prefix", uid)?;
+        let prefix = jscenario.default("prefix", uid_scenario)?;
 
         let transactions = jscenario.get::<JsoncObj>("transactions")?;
         if !transactions.is_type(Jtype::Array) {
@@ -471,10 +495,10 @@ pub fn register_injector(
         }
         let scenario_timeout = jscenario.default("timeout", transactions.count()? as u64)?;
 
-        let scenario_event = AfbEvent::new(uid);
-        let scenario_verb = AfbVerb::new(uid);
+        let scenario_event = AfbEvent::new(uid_scenario);
+        let scenario_verb = AfbVerb::new(uid_scenario);
         let injector = Injector::new(
-            uid,
+            uid_scenario,
             config.target,
             prefix,
             scenario_timeout,
@@ -488,7 +512,7 @@ pub fn register_injector(
             .set_actions("['start','stop','exec','result']")?
             .set_callback(scenario_action_cb)
             .set_context(ScenarioReqCtx {
-                _uid: uid,
+                _uid: uid_scenario,
                 job_id: 0,
                 injector,
                 evt: scenario_event,
@@ -500,7 +524,7 @@ pub fn register_injector(
         if transactions.count()? > 0 {
             let transaction_group = create_transaction_group(
                 transactions,
-                uid,
+                uid_scenario,
                 name,
                 injector_req_cb,
                 TransactionVerbCtx::Injector(injector),
@@ -536,7 +560,11 @@ pub fn register_responder(api: &mut AfbApi, config: &BindingConfig) -> Result<()
     // create one group per scenario
     for idx in 0..config.scenarios.count()? {
         let jscenario = config.scenarios.index::<JsoncObj>(idx)?;
-        let uid_scenario = jscenario.get::<&'static str>("uid")?;
+        let uid = match env::var("SCENARIO_UID") {
+            Err(_) => format!("{}:{}", jscenario.get::<String>("uid")?, idx),
+            Ok(value) => value,
+        };
+        let uid_scenario = to_static_str(uid);
         let name = jscenario.default::<&'static str>("name", uid_scenario)?;
         let transactions = jscenario.get::<JsoncObj>("transactions")?;
         if !transactions.is_type(Jtype::Array) {

@@ -2,3 +2,5 @@ name: afb-simu15118
 httpd: true
 alias:
   - /devtools:/usr/share/afb-ui-devtools/binder
+threads-max: 500
+jobs-max: 100000
