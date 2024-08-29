@@ -14,8 +14,8 @@ use crate::prelude::*;
 use afbv4::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::{env,time};
 use std::sync::{Arc, Condvar, Mutex};
+use std::{env, time};
 
 AfbDataConverter!(scenario_actions, ScenarioAction);
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -143,13 +143,14 @@ fn injector_async_response(
             }
             let jreceived = args.get::<JsoncObj>(0)?;
             let jexpected = ctx.expects.index::<JsoncObj>(0)?;
+
             match jreceived.equal(ctx.uid, jexpected.clone(), Jequal::Partial) {
                 Ok(_) => SimulationStatus::Check,
                 Err(error) => {
                     afb_log_msg!(Error, _api, "received: {}", jreceived);
                     afb_log_msg!(Error, _api, "expected: {}", jexpected);
                     SimulationStatus::Fail(error)
-                },
+                }
             }
         }
         0 => SimulationStatus::Done,
@@ -271,7 +272,7 @@ fn responder_req_cb(
             return afb_error!(
                 "responder-req-cb",
                 "invalid sequence expected:{} got:{}",
-                transac.sequence,
+                transac.sequence+1,
                 transac.queries.count()?
             );
         }
@@ -353,7 +354,7 @@ fn create_transaction_verb(
                 target: target_api,
                 uid: verb,
                 verb: verb,
-                delay: time::Duration::new(0,0),
+                delay: time::Duration::new(0, 0),
                 retry: InjectorRetryConf::default(),
             };
             transaction_verb.set_context(context);
@@ -402,7 +403,22 @@ fn create_transaction_group(
             None => JsoncObj::new(),
         };
         let expect = match transac.optional::<JsoncObj>("expect")? {
-            Some(value) => value,
+            Some(value) => {
+                match context {
+                    TransactionVerbCtx::Injector(injector) => {
+                        if injector.get_minimal_mode() {
+                            // in minimal mode only check response status
+                            let status = value.default::<String>("rcode", "ok".to_string())?;
+                            let jsonc = JsoncObj::new();
+                            jsonc.add("rcode", &status)?;
+                            jsonc
+                        } else {
+                            value
+                        }
+                    }
+                    TransactionVerbCtx::Responder(_) => value,
+                }
+            }
             None => JsoncObj::new(),
         };
 
@@ -471,7 +487,9 @@ pub fn register_injector(
 
     match config.target {
         None => return afb_error!("register_injector", "target api SHOULD be defined"),
-        Some(value) => {api.require_api(value);},
+        Some(value) => {
+            api.require_api(value);
+        }
     }
 
     for idx in 0..config.scenarios.count()? {
@@ -505,6 +523,7 @@ pub fn register_injector(
             transactions.clone(),
             config.delay_conf,
             config.retry_conf,
+            config.minimal_mode,
         )?;
         scenario_verb
             .set_name(name)

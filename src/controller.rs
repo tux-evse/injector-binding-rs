@@ -249,6 +249,7 @@ pub struct Injector {
     scenario_job: &'static AfbSchedJob,
     count: usize,
     data_set: Mutex<ScenarioState>,
+    minimal_mode: bool,
 }
 
 impl Injector {
@@ -260,6 +261,7 @@ impl Injector {
         transactions: JsoncObj,
         delay_conf: InjectorDelayConf,
         retry_conf: InjectorRetryConf,
+        minimal_mode: bool,
     ) -> Result<&'static Self, AfbError> {
         let mut data_set = ScenarioState {
             entries: Vec::new(),
@@ -281,7 +283,7 @@ impl Injector {
             let uid = transac.get::<&str>("uid")?;
             let queries = JsoncObj::array();
 
-            let delay= transac.default("delay", DEFAULT_CALL_DELAY)?;
+            let delay = transac.default("delay", DEFAULT_CALL_DELAY)?;
 
             let retry_conf = match transac.optional::<JsoncObj>("retry")? {
                 None => retry_conf,
@@ -324,6 +326,7 @@ impl Injector {
             scenario_job,
             count: transactions.count()?,
             data_set: Mutex::new(data_set),
+            minimal_mode,
         };
 
         Ok(Box::leak(Box::new(this)))
@@ -331,6 +334,10 @@ impl Injector {
 
     pub fn get_uid(&self) -> &str {
         self.uid
+    }
+
+    pub fn get_minimal_mode(&self) -> bool {
+        self.minimal_mode
     }
 
     #[track_caller]
@@ -373,14 +380,14 @@ impl Injector {
                 }
                 SimulationStatus::Check => {
                     format!(
-                        "ok {:04} - {}({})  # Checked",
-                        idx, transac.verb, transac.uid
+                        "ok {:04} - {}({}/{})  # Checked",
+                        idx, transac.verb, transac.uid, transac.retry.count
                     )
                 }
                 SimulationStatus::Fail(error) => {
                     format!(
-                        "fx {:04} - {}({})  # Fail {}",
-                        idx, transac.verb, transac.uid, error
+                        "fx {:04} - {}({}/{})  # Fail {}",
+                        idx, transac.verb, transac.uid, error, transac.retry.count
                     )
                 }
                 _ => format!(
