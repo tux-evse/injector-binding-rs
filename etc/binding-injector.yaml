@@ -4,22 +4,15 @@ binding:
     path: ${CARGO_TARGET_DIR}debug/libafb_injector.so
     info: RUST ISO-15118 EV Injector
     simulation: $SIMULATION_MODE
-<<<<<<< HEAD
     target: iso15118-simulator
-=======
-    target: iso15118-api
->>>>>>> 1e1a2ef488acdd8c3e2a3539380a953e4f47b170
     scenarios:
       - uid: scenario-1
         info: simple iso2 connection scenario
         protocol: iso2
-<<<<<<< HEAD
         retry:
           delay: 250 # wait 100ms between request
           timeout: 10000 # wait 10s max until valid response
           count: 10 # try 10 time max
-=======
->>>>>>> 1e1a2ef488acdd8c3e2a3539380a953e4f47b170
         transactions:
           - uid: sdp-evse
             query:
