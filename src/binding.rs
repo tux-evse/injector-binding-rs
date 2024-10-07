@@ -87,7 +87,15 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
     };
 
     let loop_reset = jconf.default("loop", true)?;
-    let minimal_mode =  jconf.default("minimal", false)?;
+
+    let minimal_mode = match jconf.optional::<String>("compact")? {
+        None => false,
+        Some (value) => match value.as_str() {
+            "minimal" => true,
+            _ => false,
+        }
+    };
+
     let target = jconf.optional::<&'static str>("target")?;
 
     let scenarios = jconf.get::<JsoncObj>("scenarios")?;

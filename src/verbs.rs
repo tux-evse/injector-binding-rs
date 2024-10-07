@@ -403,22 +403,7 @@ fn create_transaction_group(
             None => JsoncObj::new(),
         };
         let expect = match transac.optional::<JsoncObj>("expect")? {
-            Some(value) => {
-                match context {
-                    TransactionVerbCtx::Injector(injector) => {
-                        if injector.get_minimal_mode() {
-                            // in minimal mode only check response status
-                            let status = value.default::<String>("rcode", "ok".to_string())?;
-                            let jsonc = JsoncObj::new();
-                            jsonc.add("rcode", &status)?;
-                            jsonc
-                        } else {
-                            value
-                        }
-                    }
-                    TransactionVerbCtx::Responder(_) => value,
-                }
-            }
+            Some(value) => value,
             None => JsoncObj::new(),
         };
 
@@ -523,7 +508,6 @@ pub fn register_injector(
             transactions.clone(),
             config.delay_conf,
             config.retry_conf,
-            config.minimal_mode,
         )?;
         scenario_verb
             .set_name(name)
