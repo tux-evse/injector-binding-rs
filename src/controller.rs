@@ -237,7 +237,6 @@ pub struct InjectorEntry {
     pub status: SimulationStatus,
     pub retry: InjectorRetryConf,
     pub delay: time::Duration,
-    pub sequence: usize,
 }
 
 pub struct ScenarioState {
@@ -310,7 +309,6 @@ impl Injector {
                 status: SimulationStatus::Skip,
                 retry: retry_conf,
                 delay: delay_conf.get_duration(delay),
-                sequence: 0,
                 target,
             });
         }
@@ -397,7 +395,7 @@ impl Injector {
 pub struct ResponderEntry {
     pub uid: &'static str,
     pub queries: JsoncObj,
-    pub expects: JsoncObj,
+    pub responses: JsoncObj,
     pub sequence: usize,
     pub nonce: u32,
     pub responder: &'static Responder,

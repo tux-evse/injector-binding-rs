@@ -26,7 +26,6 @@ pub struct BindingConfig {
     pub loop_reset: bool,
     pub delay_conf: InjectorDelayConf,
     pub retry_conf: InjectorRetryConf,
-    pub minimal_mode: bool,
 }
 
 struct ApiInjectorCtx {
@@ -88,14 +87,6 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
 
     let loop_reset = jconf.default("loop", true)?;
 
-    let minimal_mode = match jconf.optional::<String>("compact")? {
-        None => false,
-        Some (value) => match value.as_str() {
-            "minimal" => true,
-            _ => false,
-        }
-    };
-
     let target = jconf.optional::<&'static str>("target")?;
 
     let scenarios = jconf.get::<JsoncObj>("scenarios")?;
@@ -121,7 +112,6 @@ pub fn binding_init(_rootv4: AfbApiV4, jconf: JsoncObj) -> Result<&'static AfbAp
         simulation,
         scenarios: scenarios.clone(),
         target,
-        minimal_mode,
         loop_reset,
         delay_conf,
         retry_conf,

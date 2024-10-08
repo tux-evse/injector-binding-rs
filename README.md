@@ -56,18 +56,52 @@ Configuration relies on standard binding/binder json/yaml config file. The injec
 * verb: injector call $target/$test *(when not defined: derives from UID as: uid-sample->uid_sample_req)*
 * delay: wait in ms before starting the test
 * query: param value to be added to test/api/verb
-* response: optional expected response *(test only defined values)*. When not defined injector relies on RPC status to set OK/FX test result.
+* response: optional values to return (responder only)
+* expect: optional the expect value to check on response (injector only)
 
-```yaml
-        transactions:
-        - uid: sdp-evse
-          query:
-            action: discover
-        - uid: iso2-handshake
-          verb: app_proto_req
+note:
+ * when verb is not defined "uid + _req" is used
+ * when response is not defined expect when exist is use as response
+ * count is the number of retry on a given command before getting expected result
+ * delay in ms is the waiting time with sequential request. Note that this delay is computed relatively to global delay config.
+ * autorun=1 runs test automatically without requesting web-ui
+
+```json
+    "autorun":0,
+    "delay":{
+        "percent":10,
+        "min":50,
+        "max":100
+      },
+    "transactions":[
+    {
+        "uid":"pkg:68",
+        "verb":"iso2:authorization_req",
+        "delay":51,
+        "query":{
+        "tagid":"authorization_req",
+        "proto":"iso2",
+        "msgid":6
+        },
+        "ruid":"pkg:70",
+        "response":{
+        "rcode":"ok",
+        "processing":"customer_interaction",
+        "tagid":"authorization_res",
+        "proto":"iso2",
+        "msgid":7
+        },
+        "expect":{
+        "rcode":"ok"
+        },
+        "retry":{
+        "timeout":3000,
+        "delay":51,
+        "count":2
+        }
+    }
+    ]
 ```
-
-Note: *scenario/start verb does not wait the end of the scenario to return. This because a scenario may last longueur than browser typical timeout.*
 
 ## starting the injector
 

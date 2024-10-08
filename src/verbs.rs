@@ -283,11 +283,11 @@ fn responder_req_cb(
 
     match received_query.equal(transac.uid, expected_query.clone(), Jequal::Partial) {
         Ok(_) => {
-            let expect = transac.expects.index::<JsoncObj>(transac.sequence)?;
-            if expect.len()? == 0 {
+            let responses = transac.responses.index::<JsoncObj>(transac.sequence)?;
+            if responses.len()? == 0 {
                 afb_rqt.reply(AFB_NO_DATA, 0);
             } else {
-                afb_rqt.reply(expect, 0);
+                afb_rqt.reply(responses, 0);
             }
         }
 
@@ -311,7 +311,7 @@ fn responder_req_cb(
 #[derive(Clone, Copy)]
 enum TransactionVerbCtx {
     Responder(&'static Responder),
-    Injector(&'static Injector),
+    Injector(),
 }
 
 fn create_transaction_verb(
@@ -319,6 +319,7 @@ fn create_transaction_verb(
     verb: &'static str,
     infos: JsoncObj,
     queries: JsoncObj,
+    responses: JsoncObj,
     expects: JsoncObj,
     callback: RqtCallback,
     context: TransactionVerbCtx,
@@ -333,14 +334,14 @@ fn create_transaction_verb(
             let context = ResponderEntry {
                 uid: verb,
                 queries: queries.clone(),
-                expects,
+                responses,
                 sequence: 0,
                 nonce: 0,
                 responder,
             };
             transaction_verb.set_context(context);
         }
-        TransactionVerbCtx::Injector(_) => {
+        TransactionVerbCtx::Injector() => {
             let target_api = match target {
                 None => return afb_error!("injector-create-verb", "config target api missing"),
                 Some(value) => value,
@@ -349,7 +350,6 @@ fn create_transaction_verb(
             let context = InjectorEntry {
                 queries: queries.clone(),
                 expects,
-                sequence: 0,
                 status: SimulationStatus::InvalidSequence,
                 target: target_api,
                 uid: verb,
@@ -392,6 +392,7 @@ fn create_transaction_group(
     let mut previous_verb = "";
     let mut infos = JsoncObj::array();
     let mut queries = JsoncObj::array();
+    let mut responses = JsoncObj::array();
     let mut expects = JsoncObj::array();
 
     for idx in 0..transactions.count()? {
@@ -405,6 +406,11 @@ fn create_transaction_group(
         let expect = match transac.optional::<JsoncObj>("expect")? {
             Some(value) => value,
             None => JsoncObj::new(),
+        };
+
+        let response = match transac.optional::<JsoncObj>("response")? {
+            Some(value) => value,
+            None => expect.clone(),
         };
 
         // build verb from transaction uid
@@ -431,6 +437,7 @@ fn create_transaction_group(
                     previous_verb,
                     infos,
                     queries,
+                    responses,
                     expects,
                     callback,
                     context,
@@ -440,12 +447,14 @@ fn create_transaction_group(
             // prepare structure for new scenario verb
             infos = JsoncObj::array();
             queries = JsoncObj::array();
+            responses = JsoncObj::array();
             expects = JsoncObj::array();
             previous_verb = current_verb;
         }
 
         infos.append(transac_uid)?;
         queries.append(query)?;
+        responses.append(response)?;
         expects.append(expect)?;
     }
     // add last verb
@@ -454,6 +463,7 @@ fn create_transaction_group(
         previous_verb,
         infos,
         queries,
+        responses,
         expects,
         callback,
         context,
@@ -530,7 +540,7 @@ pub fn register_injector(
                 uid_scenario,
                 name,
                 injector_req_cb,
-                TransactionVerbCtx::Injector(injector),
+                TransactionVerbCtx::Injector(),
                 config.target,
             )?;
             api.add_group(transaction_group);
